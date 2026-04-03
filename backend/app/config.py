@@ -37,6 +37,8 @@ class Settings:
     db_path: Path
     openai_api_key: str | None
     openai_embedding_model: str
+    openai_chat_model: str
+    openai_search_model: str
     cors_origins: list[str]
     semantic_candidate_limit: int
     semantic_min_score: float
@@ -50,6 +52,8 @@ def get_settings() -> Settings:
         db_path=db_path,
         openai_api_key=os.getenv("OPENAI_API_KEY") or None,
         openai_embedding_model=os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
+        openai_chat_model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4.1-mini"),
+        openai_search_model=os.getenv("OPENAI_SEARCH_MODEL", "gpt-4o-mini-search-preview"),
         cors_origins=_split_csv(os.getenv("BACKEND_CORS_ORIGINS")),
         semantic_candidate_limit=int(os.getenv("SEMANTIC_CANDIDATE_LIMIT", "250")),
         semantic_min_score=max(0.0, min(1.0, _env_float("SEMANTIC_MIN_SCORE", 0.64))),

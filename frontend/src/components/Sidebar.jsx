@@ -16,6 +16,8 @@ export default function Sidebar({
   collections,
   selectedCollectionId,
   onSelectCollection,
+  onShowAllNotes,
+  showAllNotes,
 }) {
   return (
     <aside className="sidebar">
@@ -58,8 +60,8 @@ export default function Sidebar({
         <div className="panel-header">
           <h2>Collections</h2>
           <button
-            className={`ghost-button ${selectedCollectionId === null ? "active" : ""}`}
-            onClick={() => onSelectCollection(null)}
+            className={`ghost-button ${selectedCollectionId === null && showAllNotes ? "active" : ""}`}
+            onClick={onShowAllNotes}
             type="button"
           >
             All notes

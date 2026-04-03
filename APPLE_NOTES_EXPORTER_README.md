@@ -19,8 +19,8 @@ This script bulk-exports Apple Notes into one merged output set.
 ## Recommended clean setup
 
 ```bash
-mkdir -p ~/apple-notes-export
-cd ~/apple-notes-export
+mkdir -p ~/Cognote
+cd ~/Cognote
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip

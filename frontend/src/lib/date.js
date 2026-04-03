@@ -1,11 +1,15 @@
-export function formatNoteDate(note) {
-  if (note?.modified_at_iso) {
+export function formatDateValue(note, isoKey, displayKey) {
+  if (note?.[isoKey]) {
     return new Intl.DateTimeFormat(undefined, {
       dateStyle: "medium",
       timeStyle: "short",
-    }).format(new Date(note.modified_at_iso));
+    }).format(new Date(note[isoKey]));
   }
-  return note?.modified_at_display || "Date unavailable";
+  return note?.[displayKey] || "Date unavailable";
+}
+
+export function formatNoteDate(note) {
+  return formatDateValue(note, "modified_at_iso", "modified_at_display");
 }
 
 export function formatCollectionCount(count) {

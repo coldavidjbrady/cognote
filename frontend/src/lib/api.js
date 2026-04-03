@@ -40,6 +40,15 @@ export function searchNotes({ query, mode, collectionId }) {
   return request(`/api/search?${params.toString()}`);
 }
 
+export function listNotes({ collectionId } = {}) {
+  const params = new URLSearchParams();
+  if (collectionId) {
+    params.set("collection_id", String(collectionId));
+  }
+  const queryString = params.toString();
+  return request(queryString ? `/api/notes?${queryString}` : "/api/notes");
+}
+
 export function getNote(noteId) {
   return request(`/api/notes/${noteId}`);
 }
@@ -82,5 +91,26 @@ export function createNoteLink(payload) {
 export function deleteNoteLink(linkId) {
   return request(`/api/links/${linkId}`, {
     method: "DELETE",
+  });
+}
+
+export function queryAssistant({
+  question,
+  mode,
+  noteId,
+  includeLinkedNotes,
+  history = [],
+  previousResponseId = null,
+}) {
+  return request("/api/assistant/query", {
+    method: "POST",
+    body: JSON.stringify({
+      question,
+      mode,
+      note_id: noteId,
+      include_linked_notes: includeLinkedNotes,
+      history,
+      previous_response_id: previousResponseId,
+    }),
   });
 }

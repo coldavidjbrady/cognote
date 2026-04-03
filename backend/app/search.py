@@ -4,6 +4,7 @@ import html
 import math
 import re
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .config import Settings
@@ -12,6 +13,7 @@ from .db import (
     get_note_embedding,
     get_recent_notes,
     keyword_search,
+    list_notes_by_date_range,
     rows_to_dicts,
 )
 from .embeddings import EmbeddingService
@@ -45,6 +47,21 @@ QUERY_STOPWORDS = {
     "with",
 }
 
+MONTH_NAME_TO_NUMBER = {
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
+}
+
 
 def _safe_snippet(value: str | None) -> str:
     if not value:
@@ -55,6 +72,103 @@ def _safe_snippet(value: str | None) -> str:
 
 def _normalize_keyword_score(rank_index: int) -> float:
     return 1.0 / (rank_index + 1)
+
+
+def _utc_iso(year: int, month: int = 1, day: int = 1) -> str:
+    return datetime(year, month, day, tzinfo=timezone.utc).isoformat()
+
+
+def _next_month(year: int, month: int) -> tuple[int, int]:
+    if month == 12:
+        return year + 1, 1
+    return year, month + 1
+
+
+def _parse_date_period(query: str) -> tuple[str, str] | None:
+    normalized = query.lower()
+
+    exact_date = re.search(r"\b(20\d{2}|19\d{2})-(\d{2})-(\d{2})\b", normalized)
+    if exact_date:
+        year, month, day = map(int, exact_date.groups())
+        try:
+            start_dt = datetime(year, month, day, tzinfo=timezone.utc)
+        except ValueError:
+            return None
+        return start_dt.isoformat(), (start_dt + timedelta(days=1)).isoformat()
+
+    month_pattern = "|".join(MONTH_NAME_TO_NUMBER.keys())
+    month_match = re.search(rf"\b({month_pattern})\s+(20\d{{2}}|19\d{{2}})\b", normalized)
+    if month_match:
+        month = MONTH_NAME_TO_NUMBER[month_match.group(1)]
+        year = int(month_match.group(2))
+        try:
+            start = _utc_iso(year, month, 1)
+            next_year, next_month = _next_month(year, month)
+            end = _utc_iso(next_year, next_month, 1)
+        except ValueError:
+            return None
+        return start, end
+
+    year_match = re.search(r"\b(20\d{2}|19\d{2})\b", normalized)
+    if year_match:
+        year = int(year_match.group(1))
+        return _utc_iso(year, 1, 1), _utc_iso(year + 1, 1, 1)
+
+    return None
+
+
+def _parse_date_query(query: str) -> dict[str, Any] | None:
+    normalized = f" {query.lower().strip()} "
+    has_date_intent = any(
+        token in normalized
+        for token in (
+            " created ",
+            " modified ",
+            " updated ",
+            " date ",
+            " dates ",
+            " dated ",
+        )
+    )
+    if not has_date_intent:
+        return None
+
+    wants_created = " created " in normalized
+    wants_modified = " modified " in normalized or " updated " in normalized
+
+    if wants_created and wants_modified:
+        date_fields = ("created_at_iso", "modified_at_iso")
+    elif wants_created:
+        date_fields = ("created_at_iso",)
+    elif wants_modified:
+        date_fields = ("modified_at_iso",)
+    else:
+        date_fields = ("created_at_iso", "modified_at_iso")
+
+    date_period = _parse_date_period(normalized)
+    if not date_period:
+        return None
+
+    period_start_iso, period_end_iso = date_period
+    if re.search(r"\b(before|prior to|earlier than|older than)\b", normalized):
+        start_iso = None
+        end_iso = period_start_iso
+    elif re.search(r"\b(after|later than|newer than)\b", normalized):
+        start_iso = period_end_iso
+        end_iso = None
+    elif re.search(r"\b(since|from)\b", normalized):
+        start_iso = period_start_iso
+        end_iso = None
+    else:
+        start_iso = period_start_iso
+        end_iso = period_end_iso
+
+    return {
+        "start_iso": start_iso,
+        "end_iso": end_iso,
+        "date_fields": date_fields,
+        "wants_all": bool(re.search(r"\b(all|every)\b", normalized)),
+    }
 
 
 def _query_tokens(query: str) -> list[str]:
@@ -248,6 +362,20 @@ def hybrid_search(
     clean_query = query.strip()
     if not clean_query:
         items = get_recent_notes(conn, limit=limit, collection_id=collection_id)
+        for item in items:
+            item["snippet"] = _safe_snippet(item.get("snippet"))
+        return items
+
+    date_query = _parse_date_query(clean_query)
+    if date_query:
+        items = list_notes_by_date_range(
+            conn,
+            start_iso=date_query["start_iso"],
+            end_iso=date_query["end_iso"],
+            date_fields=date_query["date_fields"],
+            collection_id=collection_id,
+            limit=None if date_query["wants_all"] else limit,
+        )
         for item in items:
             item["snippet"] = _safe_snippet(item.get("snippet"))
         return items

@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useState, useDeferredValue } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState, useDeferredValue } from "react";
 import NoteDetail from "./components/NoteDetail";
 import SearchResults from "./components/SearchResults";
 import Sidebar from "./components/Sidebar";
@@ -9,9 +9,11 @@ import {
   deleteNoteLink,
   getCollections,
   getNote,
+  listNotes,
   getOverview,
   getRelatedNotes,
   removeNoteFromCollection,
+  queryAssistant,
   searchNotes,
 } from "./lib/api";
 
@@ -34,6 +36,12 @@ export default function App() {
   const [relatedNotes, setRelatedNotes] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const previousSearchRef = useRef("");
+  const previousAssistantResetSignatureRef = useRef("");
+  const [lastSearchText, setLastSearchText] = useState("");
+  const [showAllNotes, setShowAllNotes] = useState(false);
+  const [assistantResetKey, setAssistantResetKey] = useState(0);
+  const activeSearch = deferredSearch.trim();
 
   const selectedCollection = useMemo(
     () => collections.find((collection) => collection.id === selectedCollectionId) || null,
@@ -68,21 +76,61 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const previousSearch = previousSearchRef.current;
+    if (!activeSearch && previousSearch) {
+      setSelectedNoteId(null);
+      setSelectedNote(null);
+      setRelatedNotes([]);
+    }
+    previousSearchRef.current = activeSearch;
+  }, [activeSearch]);
+
+  useEffect(() => {
+    if (!activeSearch && !showAllNotes) {
+      setIsSearching(false);
+      setErrorMessage("");
+      if (!lastSearchText) {
+        setResults([]);
+      }
+      return;
+    }
+
     let cancelled = false;
+    const searchSignature = JSON.stringify({
+      activeSearch,
+      searchMode,
+      selectedCollectionId,
+      showAllNotes,
+    });
+
+    if (previousAssistantResetSignatureRef.current !== searchSignature) {
+      previousAssistantResetSignatureRef.current = searchSignature;
+      setAssistantResetKey((value) => value + 1);
+    }
+
     setIsSearching(true);
     setErrorMessage("");
 
-    searchNotes({
-      query: deferredSearch,
-      mode: searchMode,
-      collectionId: selectedCollectionId,
-    })
+    const request = showAllNotes
+      ? listNotes({
+          collectionId: selectedCollectionId,
+        })
+      : searchNotes({
+          query: deferredSearch,
+          mode: searchMode,
+          collectionId: selectedCollectionId,
+        });
+
+    request
       .then((payload) => {
         if (cancelled) {
           return;
         }
         const nextResults = payload.results || [];
         setResults(nextResults);
+        if (!showAllNotes) {
+          setLastSearchText(activeSearch);
+        }
 
         if (!nextResults.length) {
           setSelectedNoteId(null);
@@ -90,9 +138,9 @@ export default function App() {
           setRelatedNotes([]);
           return;
         }
-
         const existing = nextResults.some((item) => item.id === selectedNoteId);
-        if (!existing) {
+
+        if (!existing && !showAllNotes) {
           startTransition(() => {
             setSelectedNoteId(nextResults[0].id);
           });
@@ -113,7 +161,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [deferredSearch, searchMode, selectedCollectionId]);
+  }, [deferredSearch, searchMode, selectedCollectionId, selectedNoteId, activeSearch, showAllNotes]);
 
   useEffect(() => {
     if (!selectedNoteId) {
@@ -164,15 +212,31 @@ export default function App() {
     }
   }
 
+  function handleSearchChange(value) {
+    setSearchText(value);
+    if (value.trim()) {
+      setShowAllNotes(false);
+    }
+  }
+
+  function handleShowAllNotes() {
+    setSearchText("");
+    setLastSearchText("");
+    setShowAllNotes(true);
+    setSelectedNoteId(null);
+    setSelectedNote(null);
+    setRelatedNotes([]);
+  }
+
   return (
     <div className="app-shell">
       <div className="background-orb orb-a" />
       <div className="background-orb orb-b" />
 
       <header className="topbar">
-        <div>
-          <p className="eyebrow">Natural-language notes browser</p>
-          <h1>Find patterns across your Apple Notes archive</h1>
+        <div className="topbar-copy">
+          <h1 className="topbar-title">Cognote - Your Natural Language Notes Browser</h1>
+          <p className="topbar-subtitle">Find patterns across your Apple Notes archive</p>
         </div>
 
         <div className="search-controls">
@@ -181,7 +245,7 @@ export default function App() {
             type="search"
             placeholder="Search recipes, lab results, ideas, meeting notes..."
             value={searchText}
-            onChange={(event) => setSearchText(event.target.value)}
+            onChange={(event) => handleSearchChange(event.target.value)}
           />
           <div className="mode-switcher">
             {SEARCH_MODES.map((mode) => (
@@ -194,6 +258,13 @@ export default function App() {
                 {mode.label}
               </button>
             ))}
+            <button
+              className={`ghost-button ${showAllNotes && !activeSearch ? "active" : ""}`}
+              onClick={handleShowAllNotes}
+              type="button"
+            >
+              Show all notes
+            </button>
           </div>
         </div>
       </header>
@@ -206,6 +277,8 @@ export default function App() {
           collections={collections}
           selectedCollectionId={selectedCollectionId}
           onSelectCollection={setSelectedCollectionId}
+          onShowAllNotes={handleShowAllNotes}
+          showAllNotes={showAllNotes}
         />
 
         <SearchResults
@@ -214,6 +287,8 @@ export default function App() {
           onSelectNote={(noteId) => startTransition(() => setSelectedNoteId(noteId))}
           onAssociateNote={handleAssociateNote}
           activeQuery={deferredSearch}
+          lastSearchText={lastSearchText}
+          showAllNotes={showAllNotes}
           isLoading={isSearching}
           selectedCollection={selectedCollection}
         />
@@ -222,6 +297,9 @@ export default function App() {
           note={selectedNote}
           related={relatedNotes}
           allCollections={collections}
+          assistantEnabled={Boolean(overview?.openai_enabled)}
+          assistantResetKey={assistantResetKey}
+          onAskAssistant={queryAssistant}
           onAddToCollection={handleAddToCollection}
           onRemoveFromCollection={handleRemoveFromCollection}
           onCreateCollection={handleCreateCollection}

@@ -77,7 +77,7 @@ Create a `.env` file in the repo root with:
 ```bash
 OPENAI_API_KEY=your_key_here
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
-NOTES_DB_PATH=/Users/davidjbrady/apple-notes-export/data/notes.db
+NOTES_DB_PATH=/Users/davidjbrady/Cognote/data/notes.db
 VITE_API_BASE_URL=http://127.0.0.1:8000
 SEMANTIC_MIN_SCORE=0.64
 ```

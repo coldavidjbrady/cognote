@@ -36,7 +36,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -82,7 +83,7 @@ button {
   margin-bottom: 1.25rem;
 }
 
-.topbar h1,
+.topbar-title,
 .hero-panel h1,
 .results-panel h2,
 .detail-header h2 {
@@ -92,9 +93,28 @@ button {
   margin: 0;
 }
 
-.topbar h1 {
-  max-width: 16ch;
-  font-size: clamp(2rem, 2.4vw, 3.1rem);
+.topbar-copy {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.topbar-title {
+  max-width: none;
+  font-size: clamp(1.8rem, 2.35vw, 2.9rem);
+  text-transform: none;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  color: var(--accent-rust);
+}
+
+.topbar-subtitle {
+  margin: 0;
+  max-width: none;
+  font-size: clamp(1rem, 1.3vw, 1.35rem);
+  font-style: italic;
+  line-height: 1.45;
+  white-space: nowrap;
+  color: var(--muted);
 }
 
 .eyebrow {
@@ -114,7 +134,8 @@ button {
 
 .search-input,
 .inline-form select,
-.create-collection-form input {
+.create-collection-form input,
+.assistant-input {
   width: 100%;
   border: 1px solid rgba(32, 35, 31, 0.08);
   border-radius: 1rem;
@@ -394,6 +415,17 @@ button {
   color: #8b6317;
 }
 
+.match-library,
+.match-recent {
+  background: rgba(32, 35, 31, 0.08);
+  color: var(--muted);
+}
+
+.match-date {
+  background: rgba(49, 92, 74, 0.12);
+  color: var(--accent-forest);
+}
+
 .result-card h3,
 .detail-section h3 {
   margin: 0.5rem 0 0.35rem;
@@ -432,8 +464,7 @@ button {
 }
 
 .detail-header {
-  padding-bottom: 1rem;
-  border-bottom: 1px solid rgba(32, 35, 31, 0.08);
+  padding-bottom: 0.25rem;
 }
 
 .meta-row {
@@ -527,6 +558,225 @@ button {
   text-align: center;
 }
 
+.empty-state--detail {
+  min-height: 10rem;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.42);
+  border-radius: 1.25rem;
+  border: 1px dashed rgba(32, 35, 31, 0.12);
+}
+
+.detail-section--assistant {
+  border-bottom: none;
+}
+
+.assistant-panel {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  border-radius: 1.4rem;
+  border: 1px solid rgba(15, 18, 20, 0.35);
+  background:
+    radial-gradient(circle at top right, rgba(196, 144, 42, 0.14), transparent 20rem),
+    radial-gradient(circle at bottom left, rgba(49, 92, 74, 0.18), transparent 22rem),
+    linear-gradient(180deg, #1b1f20, #141818);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 18px 36px rgba(14, 16, 17, 0.28);
+}
+
+.assistant-toolbar,
+.assistant-thread-shell,
+.assistant-context-card {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.assistant-mode-switcher,
+.assistant-actions,
+.assistant-context-row,
+.assistant-message__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.assistant-panel .mode-pill {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 249, 239, 0.82);
+}
+
+.assistant-panel .mode-pill.active {
+  background: rgba(196, 144, 42, 0.86);
+  color: #181515;
+}
+
+.assistant-context-card,
+.assistant-thread,
+.assistant-composer {
+  padding: 1rem;
+  border-radius: 1.2rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.assistant-context-card {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.assistant-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: rgba(255, 249, 239, 0.92);
+}
+
+.assistant-context-copy {
+  margin: 0;
+}
+
+.assistant-context-card .muted,
+.assistant-panel .muted {
+  color: rgba(235, 227, 215, 0.68);
+}
+
+.assistant-context-chips,
+.assistant-links,
+.assistant-message__identity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.assistant-context-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 0.86rem;
+  color: rgba(235, 227, 215, 0.72);
+}
+
+.assistant-context-chip strong {
+  color: rgba(255, 249, 239, 0.96);
+  font-weight: 600;
+}
+
+.assistant-input {
+  min-height: 7.5rem;
+  resize: vertical;
+  background: rgba(248, 243, 234, 0.96);
+  color: #20231f;
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.assistant-thread-shell {
+  gap: 0.85rem;
+}
+
+.assistant-thread {
+  display: grid;
+  gap: 0.85rem;
+  background: rgba(0, 0, 0, 0.18);
+  max-height: 32rem;
+  overflow: auto;
+}
+
+.assistant-message {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.95rem 1rem;
+  border-radius: 1rem;
+}
+
+.assistant-message--assistant {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.assistant-message--user {
+  background: rgba(170, 86, 54, 0.16);
+  border: 1px solid rgba(170, 86, 54, 0.22);
+}
+
+.assistant-speaker {
+  color: rgba(255, 249, 239, 0.96);
+  font-weight: 700;
+}
+
+.assistant-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.28rem 0.58rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(235, 227, 215, 0.88);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.assistant-pill--web {
+  background: rgba(196, 144, 42, 0.18);
+  color: #f0d18f;
+}
+
+.assistant-message__body {
+  white-space: pre-wrap;
+  line-height: 1.7;
+  color: rgba(255, 249, 239, 0.92);
+}
+
+.assistant-link {
+  color: #f0d18f;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(240, 209, 143, 0.35);
+}
+
+.assistant-link:hover {
+  color: #ffe8b4;
+}
+
+.assistant-composer {
+  display: grid;
+  gap: 0.85rem;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.assistant-actions {
+  justify-content: flex-start;
+}
+
+.assistant-error {
+  margin: 0;
+  color: #ffc2ac;
+}
+
+.empty-state--assistant {
+  min-height: 8rem;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 249, 239, 0.88);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 1rem;
+}
+
+textarea:focus,
+input:focus,
+select:focus {
+  outline: 2px solid rgba(49, 92, 74, 0.22);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .error-banner {
   padding: 0.9rem 1rem;
   margin-bottom: 1rem;
@@ -553,6 +803,14 @@ button {
   .topbar {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .topbar-title {
+    white-space: normal;
+  }
+
+  .topbar-subtitle {
+    white-space: normal;
   }
 
   .search-controls {

@@ -619,6 +619,105 @@ def get_recent_notes(
     return rows_to_dicts(rows)
 
 
+def list_notes(
+    conn: sqlite3.Connection,
+    collection_id: int | None = None,
+) -> list[dict[str, Any]]:
+    query = """
+        SELECT
+            n.id,
+            n.title,
+            n.folder,
+            n.account,
+            n.source_modified_at AS modified_at_display,
+            n.modified_at_iso,
+            substr(n.body_text, 1, 220) AS snippet,
+            'library' AS match_type,
+            0.0 AS score
+        FROM notes n
+    """
+    params: list[Any] = []
+    if collection_id is not None:
+        query += " JOIN collection_notes cn ON cn.note_id = n.id WHERE cn.collection_id = ?"
+        params.append(collection_id)
+    query += """
+        ORDER BY
+            CASE WHEN n.modified_at_iso IS NULL THEN 1 ELSE 0 END,
+            n.modified_at_iso DESC,
+            n.imported_at DESC
+    """
+    rows = conn.execute(query, tuple(params)).fetchall()
+    return rows_to_dicts(rows)
+
+
+def list_notes_by_date_range(
+    conn: sqlite3.Connection,
+    start_iso: str | None = None,
+    end_iso: str | None = None,
+    date_fields: tuple[str, ...] = ("created_at_iso", "modified_at_iso"),
+    collection_id: int | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    supported_fields = {
+        "created_at_iso": "n.created_at_iso",
+        "modified_at_iso": "n.modified_at_iso",
+    }
+    active_fields = [supported_fields[field] for field in date_fields if field in supported_fields]
+    if not active_fields:
+        active_fields = [supported_fields["created_at_iso"], supported_fields["modified_at_iso"]]
+
+    comparator_clauses = []
+    params: list[Any] = []
+    for field in active_fields:
+        field_clauses = []
+        if start_iso is not None:
+            field_clauses.append(f"{field} >= ?")
+            params.append(start_iso)
+        if end_iso is not None:
+            field_clauses.append(f"{field} < ?")
+            params.append(end_iso)
+        if field_clauses:
+            comparator_clauses.append(f"({' AND '.join(field_clauses)})")
+
+    if not comparator_clauses:
+        return []
+
+    query = """
+        SELECT
+            n.id,
+            n.title,
+            n.folder,
+            n.account,
+            n.source_modified_at AS modified_at_display,
+            n.modified_at_iso,
+            n.source_created_at AS created_at_display,
+            n.created_at_iso,
+            substr(n.body_text, 1, 220) AS snippet,
+            'date' AS match_type,
+            0.0 AS score
+        FROM notes n
+    """
+
+    where_clauses = [f"({' OR '.join(comparator_clauses)})"]
+    if collection_id is not None:
+        query += " JOIN collection_notes cn ON cn.note_id = n.id"
+        where_clauses.append("cn.collection_id = ?")
+        params.append(collection_id)
+
+    query += " WHERE " + " AND ".join(where_clauses)
+    query += """
+        ORDER BY
+            COALESCE(n.modified_at_iso, n.created_at_iso, n.imported_at) DESC,
+            LOWER(n.title)
+    """
+    if limit is not None:
+        query += " LIMIT ?"
+        params.append(limit)
+
+    rows = conn.execute(query, tuple(params)).fetchall()
+    return rows_to_dicts(rows)
+
+
 def keyword_search(
     conn: sqlite3.Connection,
     query: str,
