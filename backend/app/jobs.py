@@ -23,11 +23,17 @@ def utc_now() -> str:
 class SyncArtifacts:
     output_dir: str
     csv_path: str
+    csv_exists: bool
     jsonl_path: str
+    jsonl_exists: bool
     markdown_path: str
+    markdown_exists: bool
     summary_path: str
+    summary_exists: bool
     state_path: str
+    state_exists: bool
     xlsx_path: str
+    xlsx_exists: bool
 
 
 class SyncJobManager:
@@ -46,10 +52,15 @@ class SyncJobManager:
             "started_at": None,
             "finished_at": None,
             "error": None,
+            "warnings": [],
             "output_dir": None,
             "artifacts": None,
             "export_summary": None,
             "import_summary": None,
+            "runtime_mode": self._settings.runtime_mode,
+            "app_support_dir": str(self._settings.app_support_dir),
+            "exporter_path": str(self._settings.exporter_script_path),
+            "exporter_command": None,
         }
 
     def get_status(self) -> dict[str, object]:
@@ -83,10 +94,15 @@ class SyncJobManager:
                 "started_at": utc_now(),
                 "finished_at": None,
                 "error": None,
+                "warnings": [],
                 "output_dir": None,
                 "artifacts": None,
                 "export_summary": None,
                 "import_summary": None,
+                "runtime_mode": self._settings.runtime_mode,
+                "app_support_dir": str(self._settings.app_support_dir),
+                "exporter_path": str(self._settings.exporter_script_path),
+                "exporter_command": None,
             }
 
         if run_async:
@@ -115,17 +131,59 @@ class SyncJobManager:
         return output_dir
 
     def _artifacts_for_output_dir(self, output_dir: Path) -> SyncArtifacts:
+        csv_path = output_dir / "notes_export.csv"
+        jsonl_path = output_dir / "notes_export.jsonl"
+        markdown_path = output_dir / "notes_merged.md"
+        summary_path = output_dir / "export_summary.json"
+        state_path = output_dir / ".export_state.json"
+        xlsx_path = output_dir / "notes_export.xlsx"
         return SyncArtifacts(
             output_dir=str(output_dir),
-            csv_path=str(output_dir / "notes_export.csv"),
-            jsonl_path=str(output_dir / "notes_export.jsonl"),
-            markdown_path=str(output_dir / "notes_merged.md"),
-            summary_path=str(output_dir / "export_summary.json"),
-            state_path=str(output_dir / ".export_state.json"),
-            xlsx_path=str(output_dir / "notes_export.xlsx"),
+            csv_path=str(csv_path),
+            csv_exists=csv_path.exists(),
+            jsonl_path=str(jsonl_path),
+            jsonl_exists=jsonl_path.exists(),
+            markdown_path=str(markdown_path),
+            markdown_exists=markdown_path.exists(),
+            summary_path=str(summary_path),
+            summary_exists=summary_path.exists(),
+            state_path=str(state_path),
+            state_exists=state_path.exists(),
+            xlsx_path=str(xlsx_path),
+            xlsx_exists=xlsx_path.exists(),
         )
 
-    def _run_export(self, output_dir: Path, request: SyncRunRequest) -> tuple[dict[str, object], SyncArtifacts, str]:
+    def _validate_export_artifacts(
+        self,
+        artifacts: SyncArtifacts,
+        request: SyncRunRequest,
+    ) -> list[str]:
+        warnings: list[str] = []
+        if not artifacts.jsonl_exists:
+            raise RuntimeError(f"Exporter completed without producing {artifacts.jsonl_path}")
+        if not artifacts.csv_exists:
+            raise RuntimeError(f"Exporter completed without producing {artifacts.csv_path}")
+        if not artifacts.markdown_exists:
+            raise RuntimeError(f"Exporter completed without producing {artifacts.markdown_path}")
+        if not artifacts.summary_exists:
+            warnings.append(
+                "Exporter completed without export_summary.json; continuing with artifact-only status."
+            )
+        if request.resume_export and not artifacts.state_exists:
+            warnings.append(
+                "Resume export was requested, but no .export_state.json snapshot was written."
+            )
+        if not request.skip_xlsx and not artifacts.xlsx_exists:
+            warnings.append(
+                "XLSX export was not produced. This can happen when openpyxl is unavailable in the runtime."
+            )
+        return warnings
+
+    def _run_export(
+        self,
+        output_dir: Path,
+        request: SyncRunRequest,
+    ) -> tuple[dict[str, object], SyncArtifacts, str, list[str], list[str]]:
         exporter_path = self._settings.exporter_script_path
         if not exporter_path.exists():
             raise RuntimeError(f"Exporter script not found at {exporter_path}")
@@ -150,26 +208,25 @@ class SyncJobManager:
             capture_output=True,
             text=True,
             check=False,
+            cwd=str(self._settings.resource_root),
         )
         if proc.returncode != 0:
             stderr = (proc.stderr or "").strip()
             stdout = (proc.stdout or "").strip()
             detail = stderr or stdout or "Unknown exporter error"
-            raise RuntimeError(f"Exporter failed: {detail}")
+            raise RuntimeError(f"Exporter failed from {exporter_path}: {detail}")
 
         artifacts = self._artifacts_for_output_dir(output_dir)
-        jsonl_path = Path(artifacts.jsonl_path)
-        if not jsonl_path.exists():
-            raise RuntimeError(f"Exporter completed without producing {jsonl_path}")
+        warnings = self._validate_export_artifacts(artifacts, request)
 
-        summary_path = Path(artifacts.summary_path)
         export_summary: dict[str, object] = {}
-        if summary_path.exists():
+        if artifacts.summary_exists:
+            summary_path = Path(artifacts.summary_path)
             export_summary = json.loads(summary_path.read_text(encoding="utf-8"))
 
         stdout_lines = [line for line in (proc.stdout or "").splitlines() if line.strip()]
         stdout_excerpt = "\n".join(stdout_lines[-12:])
-        return export_summary, artifacts, stdout_excerpt
+        return export_summary, artifacts, stdout_excerpt, warnings, command
 
     def _run_job(self, job_id: str, job_type: str, request: SyncRunRequest) -> None:
         try:
@@ -185,7 +242,10 @@ class SyncJobManager:
                 phase="exporting_notes",
                 message="Exporting Apple Notes into a transitional snapshot.",
             )
-            export_summary, artifacts, stdout_excerpt = self._run_export(output_dir, request)
+            export_summary, artifacts, stdout_excerpt, warnings, command = self._run_export(
+                output_dir,
+                request,
+            )
             self._set_status(
                 job_id,
                 artifacts=asdict(artifacts),
@@ -193,6 +253,8 @@ class SyncJobManager:
                     **export_summary,
                     "stdout_excerpt": stdout_excerpt,
                 },
+                warnings=warnings,
+                exporter_command=command,
                 phase="importing_database",
                 message="Importing exported notes into SQLite.",
             )

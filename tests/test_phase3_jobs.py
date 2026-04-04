@@ -63,10 +63,12 @@ class SyncJobManagerTests(unittest.TestCase):
                 settings = config.get_settings()
                 manager = jobs.SyncJobManager(settings)
 
-                def fake_subprocess_run(command, capture_output, text, check):
+                def fake_subprocess_run(command, capture_output, text, check, cwd):
                     output_dir = Path(command[command.index("--output-dir") + 1])
                     output_dir.mkdir(parents=True, exist_ok=True)
+                    (output_dir / "notes_export.csv").write_text("id,title\nnote-1,Test\n", encoding="utf-8")
                     (output_dir / "notes_export.jsonl").write_text('{"id":"note-1"}\n', encoding="utf-8")
+                    (output_dir / "notes_merged.md").write_text("# Test\n", encoding="utf-8")
                     (output_dir / "export_summary.json").write_text(
                         '{"total_notes": 1, "output_dir": "%s"}' % output_dir,
                         encoding="utf-8",

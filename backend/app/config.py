@@ -103,7 +103,9 @@ def _default_exporter_script_path(resource_root: Path, source_root: Path) -> Pat
         return Path(override).expanduser().resolve()
 
     candidates = (
+        resource_root / "resources" / "apple_notes_exporter_v4.py",
         resource_root / "apple_notes_exporter_v4.py",
+        resource_root / "backend" / "resources" / "apple_notes_exporter_v4.py",
         source_root / "apple_notes_exporter_v4.py",
     )
     for candidate in candidates:
