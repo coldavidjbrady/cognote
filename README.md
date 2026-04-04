@@ -12,6 +12,12 @@ The app is designed to stay local-first:
 - semantic search uses OpenAI embeddings when `OPENAI_API_KEY` is available
 - the UI is a React app with a reader-style note view and manual collections/associations
 
+## Documentation
+
+- Developer setup and local workflow: this file
+- Packaged app installation: [INSTALL_MAC_APP.md](/Users/davidjbrady/Cognote/INSTALL_MAC_APP.md)
+- Rebuilding the macOS app bundle: [PACKAGING.md](/Users/davidjbrady/Cognote/PACKAGING.md)
+
 ## Architecture
 
 ### Backend
@@ -68,6 +74,12 @@ You only need to reinstall when dependencies change or `.venv` is recreated.
 ```bash
 cd frontend
 npm install
+```
+
+If you plan to rebuild the packaged app too, also install packaging dependencies:
+
+```bash
+python -m pip install -r requirements-packaging.txt
 ```
 
 ### 3) Environment variables
@@ -146,6 +158,22 @@ npm run dev
 ```
 
 The UI will start on `http://127.0.0.1:5173`.
+
+## Build the packaged app
+
+If you want to rebuild the macOS desktop app:
+
+```bash
+./scripts/build_mac_app.sh
+```
+
+The packaged app will be written to:
+
+```bash
+dist/Cognote.app
+```
+
+For full packaging details, use [PACKAGING.md](/Users/davidjbrady/Cognote/PACKAGING.md).
 
 ## Search behavior notes
 
