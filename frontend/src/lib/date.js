@@ -15,3 +15,13 @@ export function formatNoteDate(note) {
 export function formatCollectionCount(count) {
   return `${count} ${count === 1 ? "note" : "notes"}`;
 }
+
+export function formatDateTime(value) {
+  if (!value) {
+    return "Not yet run";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}

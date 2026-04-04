@@ -1,4 +1,4 @@
-import { formatCollectionCount } from "../lib/date";
+import { formatCollectionCount, formatDateTime } from "../lib/date";
 
 function StatCard({ label, value, accent }) {
   return (
@@ -13,12 +13,18 @@ function StatCard({ label, value, accent }) {
 
 export default function Sidebar({
   overview,
+  settings,
+  jobStatus,
   collections,
   selectedCollectionId,
   onSelectCollection,
   onShowAllNotes,
   showAllNotes,
+  archiveMode,
 }) {
+  const latestSyncAt = jobStatus?.finished_at || jobStatus?.started_at || null;
+  const isSyncing = jobStatus?.status === "running";
+
   return (
     <aside className="sidebar">
       <section className="sidebar-panel hero-panel">
@@ -44,6 +50,11 @@ export default function Sidebar({
             accent="var(--accent-forest)"
           />
           <StatCard
+            label="Archived"
+            value={overview?.archived_notes || 0}
+            accent="var(--accent-rust)"
+          />
+          <StatCard
             label="Folders"
             value={overview?.total_folders || 0}
             accent="var(--accent-rust)"
@@ -53,6 +64,41 @@ export default function Sidebar({
             value={overview?.notes_with_embeddings || 0}
             accent="var(--accent-gold)"
           />
+        </div>
+        <div className="library-meta">
+          <span className={`status-pill ${archiveMode ? "archived" : "on"}`}>
+            {archiveMode ? "Viewing archive" : "Showing active notes"}
+          </span>
+          {settings?.packaged_mode ? (
+            <span className="muted">Packaged app mode</span>
+          ) : (
+            <span className="muted">Developer mode</span>
+          )}
+        </div>
+      </section>
+
+      <section className="sidebar-panel">
+        <div className="panel-header">
+          <h2>Sync status</h2>
+          <span className={`status-pill ${isSyncing ? "syncing" : "off"}`}>
+            {isSyncing ? "Sync running" : "Ready"}
+          </span>
+        </div>
+        <div className="sync-status-card">
+          <strong>{jobStatus?.message || "No sync has been started in this session."}</strong>
+          <p className="muted">
+            Last sync: {formatDateTime(latestSyncAt)}
+          </p>
+          {jobStatus?.status === "complete" && jobStatus?.import_summary ? (
+            <div className="sync-metrics">
+              <span>{jobStatus.import_summary.imported} imported</span>
+              <span>{jobStatus.import_summary.changed} changed</span>
+              <span>{jobStatus.import_summary.archived} archived</span>
+            </div>
+          ) : null}
+          {jobStatus?.status === "failed" && jobStatus?.error ? (
+            <p className="sync-error">{jobStatus.error}</p>
+          ) : null}
         </div>
       </section>
 

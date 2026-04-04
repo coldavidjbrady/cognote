@@ -10,13 +10,18 @@ export default function SearchResults({
   showAllNotes,
   isLoading,
   selectedCollection,
+  archiveMode,
 }) {
   const trimmedQuery = activeQuery.trim();
-  const heading = selectedCollection
-    ? selectedCollection.name
-    : showAllNotes
-      ? "All notes"
-      : trimmedQuery || lastSearchText || "Search notes";
+  const heading = archiveMode
+    ? selectedCollection
+      ? `${selectedCollection.name} archive`
+      : "Archived notes"
+    : selectedCollection
+      ? selectedCollection.name
+      : showAllNotes
+        ? "All notes"
+        : trimmedQuery || lastSearchText || "Search notes";
 
   return (
     <section className="results-panel">
@@ -26,14 +31,19 @@ export default function SearchResults({
           <h2>{heading}</h2>
         </div>
         <span className="result-count">
-          {isLoading ? "Updating..." : `${results.length} shown`}
+          {isLoading ? "Updating..." : `${results.length} ${archiveMode ? "archived" : "shown"}`}
         </span>
       </div>
 
       <div className="results-list">
         {results.length === 0 && !isLoading ? (
           <div className="empty-state">
-            {trimmedQuery ? (
+            {archiveMode ? (
+              <>
+                <h3>No archived notes matched yet</h3>
+                <p>Archived notes stay hidden from the main library until you open this archive view.</p>
+              </>
+            ) : trimmedQuery ? (
               <>
                 <h3>No notes matched yet</h3>
                 <p>Try a broader phrase or switch search mode to keyword or semantic.</p>
@@ -64,6 +74,9 @@ export default function SearchResults({
             >
               <div className="result-card__meta">
                 <span className={`match-badge match-${result.match_type}`}>{result.match_type}</span>
+                {result.is_archived ? (
+                  <span className="status-pill archived">Archived</span>
+                ) : null}
                 {result.match_type === "date" ? (
                   <>
                     <span>

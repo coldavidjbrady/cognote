@@ -291,9 +291,19 @@ button {
   color: var(--accent-rust);
 }
 
+.status-pill.archived {
+  background: rgba(124, 81, 66, 0.14);
+  color: #7b4f42;
+}
+
+.status-pill.syncing {
+  background: rgba(196, 144, 42, 0.18);
+  color: #8b6317;
+}
+
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
 }
 
@@ -312,6 +322,27 @@ button {
   margin-top: 0.35rem;
   font-size: 1.3rem;
   font-weight: 700;
+}
+
+.library-meta,
+.sync-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.85rem;
+}
+
+.sync-status-card {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.95rem;
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.sync-error {
+  margin: 0;
+  color: var(--accent-rust);
 }
 
 .collection-list,
@@ -367,6 +398,20 @@ button {
   padding: 1rem;
   max-height: calc(100vh - 9rem);
   overflow: auto;
+}
+
+.sync-banner {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  padding: 1rem 1.1rem;
+  margin-bottom: 1rem;
+  border-radius: 1.2rem;
+  backdrop-filter: blur(14px);
+  background: linear-gradient(135deg, rgba(255, 250, 242, 0.9), rgba(255, 255, 255, 0.72));
+  border: 1px solid rgba(196, 144, 42, 0.2);
+  box-shadow: var(--shadow);
 }
 
 .result-card {
@@ -465,6 +510,13 @@ button {
 
 .detail-header {
   padding-bottom: 0.25rem;
+}
+
+.detail-header__row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .meta-row {
@@ -784,8 +836,110 @@ button:disabled {
   border-radius: 1rem;
 }
 
+.setup-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(20rem, 0.9fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.setup-card,
+.settings-sheet {
+  backdrop-filter: blur(14px);
+  background: var(--bg-strong);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.setup-card {
+  border-radius: 1.6rem;
+  padding: 1.35rem;
+}
+
+.setup-card--primary h2,
+.settings-sheet h2 {
+  margin: 0;
+  font-family: "Fraunces", serif;
+  font-weight: 600;
+}
+
+.setup-copy {
+  margin: 0.85rem 0 0;
+  max-width: 44rem;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.setup-options,
+.setup-note-grid,
+.setup-status-block,
+.settings-summary,
+.settings-form {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.setup-options,
+.settings-form {
+  margin-top: 1.25rem;
+}
+
+.setup-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.setup-note-grid,
+.settings-summary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 1.2rem;
+}
+
+.setup-note-card,
+.settings-summary-card {
+  padding: 0.95rem;
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.setup-actions,
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-top: 1.15rem;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: rgba(20, 21, 18, 0.28);
+}
+
+.settings-sheet {
+  width: min(42rem, 100%);
+  border-radius: 1.6rem;
+  padding: 1.35rem;
+}
+
+.settings-label {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
 @media (max-width: 1180px) {
   .workspace-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .setup-shell {
     grid-template-columns: 1fr;
   }
 
@@ -818,6 +972,11 @@ button:disabled {
   }
 
   .stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .setup-note-grid,
+  .settings-summary {
     grid-template-columns: 1fr;
   }
 }

@@ -263,11 +263,17 @@ export default function NoteDetail({
         {note ? (
           <header className="detail-header">
             <div>
-              <p className="eyebrow">{note.folder}</p>
+              <div className="detail-header__row">
+                <p className="eyebrow">{note.folder}</p>
+                {note.is_archived ? <span className="status-pill archived">Archived locally</span> : null}
+              </div>
               <h2>{note.title || "Untitled note"}</h2>
               <div className="meta-row">
                 <span>Created {formatDateValue(note, "created_at_iso", "created_at_display")}</span>
                 <span>Modified {formatDateValue(note, "modified_at_iso", "modified_at_display")}</span>
+                {note.is_archived && note.archived_at ? (
+                  <span>Archived {formatDateValue(note, "archived_at", "archived_at")}</span>
+                ) : null}
                 <span>{note.word_count} words</span>
                 <span>{note.char_count} characters</span>
               </div>

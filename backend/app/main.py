@@ -211,7 +211,11 @@ def search(
     mode: str = Query(default="hybrid", pattern="^(hybrid|keyword|semantic)$"),
     limit: int = Query(default=20, ge=1, le=50),
     collection_id: int | None = Query(default=None),
+    include_archived: bool = Query(default=False),
+    archived_only: bool = Query(default=False),
 ) -> dict[str, object]:
+    if archived_only:
+        include_archived = True
     with closing(connect(settings.db_path)) as conn:
         init_db(conn)
         results = hybrid_search(
@@ -222,6 +226,8 @@ def search(
             mode=mode,
             limit=limit,
             collection_id=collection_id,
+            include_archived=include_archived,
+            archived_only=archived_only,
         )
         return {
             "query": q,
@@ -232,10 +238,21 @@ def search(
 
 
 @app.get("/api/notes")
-def notes(collection_id: int | None = Query(default=None)) -> dict[str, object]:
+def notes(
+    collection_id: int | None = Query(default=None),
+    include_archived: bool = Query(default=False),
+    archived_only: bool = Query(default=False),
+) -> dict[str, object]:
+    if archived_only:
+        include_archived = True
     with closing(connect(settings.db_path)) as conn:
         init_db(conn)
-        results = list_notes(conn, collection_id=collection_id)
+        results = list_notes(
+            conn,
+            collection_id=collection_id,
+            include_archived=include_archived,
+            archived_only=archived_only,
+        )
         return {
             "count": len(results),
             "results": results,

@@ -25,7 +25,42 @@ export function getOverview() {
   return request("/api/overview");
 }
 
-export function searchNotes({ query, mode, collectionId }) {
+export function getAppSettings() {
+  return request("/api/settings");
+}
+
+export function updateOpenAIKey(apiKey) {
+  return request("/api/settings/openai-key", {
+    method: "PUT",
+    body: JSON.stringify({ api_key: apiKey }),
+  });
+}
+
+export function deleteOpenAIKey() {
+  return request("/api/settings/openai-key", {
+    method: "DELETE",
+  });
+}
+
+export function getJobStatus() {
+  return request("/api/jobs/status");
+}
+
+export function startSetupJob(payload = {}) {
+  return request("/api/jobs/setup", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function startSyncJob(payload = {}) {
+  return request("/api/jobs/sync", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function searchNotes({ query, mode, collectionId, archivedOnly = false }) {
   const params = new URLSearchParams();
   if (query) {
     params.set("q", query);
@@ -36,14 +71,20 @@ export function searchNotes({ query, mode, collectionId }) {
   if (collectionId) {
     params.set("collection_id", String(collectionId));
   }
+  if (archivedOnly) {
+    params.set("archived_only", "true");
+  }
   params.set("limit", "24");
   return request(`/api/search?${params.toString()}`);
 }
 
-export function listNotes({ collectionId } = {}) {
+export function listNotes({ collectionId, archivedOnly = false } = {}) {
   const params = new URLSearchParams();
   if (collectionId) {
     params.set("collection_id", String(collectionId));
+  }
+  if (archivedOnly) {
+    params.set("archived_only", "true");
   }
   const queryString = params.toString();
   return request(queryString ? `/api/notes?${queryString}` : "/api/notes");
