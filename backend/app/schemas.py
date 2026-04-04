@@ -43,3 +43,7 @@ class SyncRunRequest(BaseModel):
     skip_xlsx: bool = False
     resume_export: bool = False
     progress_every: int = Field(default=25, ge=0, le=500)
+
+
+class OpenAIKeyUpdateRequest(BaseModel):
+    api_key: str = Field(min_length=20, max_length=300)

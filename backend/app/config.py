@@ -7,10 +7,13 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from .secrets import get_openai_api_key
+
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 APP_NAME = "Cognote"
 RuntimeMode = Literal["dev", "packaged"]
+OpenAIKeySource = Literal["env", "keychain", "none"]
 DEFAULT_DB_PATH = BASE_DIR / "data" / "notes.db"
 DEFAULT_CORS_ORIGINS = (
     "http://127.0.0.1:5173",
@@ -109,6 +112,17 @@ def _default_exporter_script_path(resource_root: Path, source_root: Path) -> Pat
     return candidates[0].resolve()
 
 
+def _resolve_openai_api_key(runtime_mode: RuntimeMode) -> tuple[str | None, OpenAIKeySource]:
+    env_value = (os.getenv("OPENAI_API_KEY") or "").strip()
+    if env_value:
+        return env_value, "env"
+    if runtime_mode == "packaged":
+        keychain_value = get_openai_api_key()
+        if keychain_value:
+            return keychain_value, "keychain"
+    return None, "none"
+
+
 @dataclass(frozen=True)
 class Settings:
     runtime_mode: RuntimeMode
@@ -120,6 +134,7 @@ class Settings:
     exports_root_dir: Path
     exporter_script_path: Path
     openai_api_key: str | None
+    openai_api_key_source: OpenAIKeySource
     openai_embedding_model: str
     openai_chat_model: str
     openai_search_model: str
@@ -143,6 +158,7 @@ def get_settings() -> Settings:
     runtime_mode = _runtime_mode()
     app_support_dir = _default_app_support_dir()
     resource_root = _resource_root()
+    openai_api_key, openai_api_key_source = _resolve_openai_api_key(runtime_mode)
     db_path = Path(
         os.getenv("NOTES_DB_PATH", str(_default_db_path(runtime_mode, app_support_dir)))
     ).expanduser().resolve()
@@ -155,7 +171,8 @@ def get_settings() -> Settings:
         frontend_dist_dir=_default_frontend_dist_dir(resource_root),
         exports_root_dir=_default_exports_root_dir(runtime_mode, BASE_DIR, app_support_dir),
         exporter_script_path=_default_exporter_script_path(resource_root, BASE_DIR),
-        openai_api_key=os.getenv("OPENAI_API_KEY") or None,
+        openai_api_key=openai_api_key,
+        openai_api_key_source=openai_api_key_source,
         openai_embedding_model=os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
         openai_chat_model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4.1-mini"),
         openai_search_model=os.getenv("OPENAI_SEARCH_MODEL", "gpt-4o-mini-search-preview"),

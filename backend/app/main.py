@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
-from .config import get_settings
+from .config import clear_settings_cache, get_settings
 from .db import (
     add_note_to_collection,
     connect,
@@ -27,11 +27,13 @@ from .db import (
 from .embeddings import EmbeddingService
 from .jobs import SyncJobManager
 from .llm import LLMService
+from .secrets import delete_openai_api_key, keychain_available, set_openai_api_key
 from .schemas import (
     AssistantQuery,
     CollectionCreate,
     CollectionNoteAdd,
     NoteLinkCreate,
+    OpenAIKeyUpdateRequest,
     SyncRunRequest,
 )
 from .search import cosine_similarity, hybrid_search, related_notes
@@ -50,6 +52,33 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def refresh_runtime_state() -> None:
+    global settings, embedding_service, llm_service, sync_job_manager
+    clear_settings_cache()
+    settings = get_settings()
+    embedding_service = EmbeddingService(settings)
+    llm_service = LLMService(settings)
+    sync_job_manager = SyncJobManager(settings)
+
+
+def current_settings_payload() -> dict[str, object]:
+    return {
+        "runtime_mode": settings.runtime_mode,
+        "packaged_mode": settings.is_packaged,
+        "semantic_search_enabled": embedding_service.enabled,
+        "chat_enabled": llm_service.enabled,
+        "openai_key_configured": bool(settings.openai_api_key),
+        "openai_key_source": settings.openai_api_key_source,
+        "keychain_available": keychain_available(),
+        "can_manage_openai_key": settings.is_packaged and keychain_available(),
+        "models": {
+            "embedding": settings.openai_embedding_model,
+            "chat": settings.openai_chat_model,
+            "search": settings.openai_search_model,
+        },
+    }
 
 
 def _frontend_ready() -> bool:
@@ -96,8 +125,52 @@ def health() -> dict[str, object]:
             "exports_root_dir": str(settings.exports_root_dir),
             "frontend_ready": _frontend_ready(),
             "openai_enabled": embedding_service.enabled,
+            "openai_key_source": settings.openai_api_key_source,
             "embeddings_indexed": count_embeddings(conn),
         }
+
+
+@app.get("/api/settings")
+def app_settings() -> dict[str, object]:
+    return current_settings_payload()
+
+
+@app.put("/api/settings/openai-key")
+def update_openai_key(payload: OpenAIKeyUpdateRequest) -> dict[str, object]:
+    if not settings.is_packaged:
+        raise HTTPException(
+            status_code=400,
+            detail="OpenAI key management is only available in packaged mode. Use .env in dev mode.",
+        )
+    if not keychain_available():
+        raise HTTPException(status_code=501, detail="macOS Keychain is not available on this system.")
+
+    try:
+        set_openai_api_key(payload.api_key)
+        refresh_runtime_state()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return current_settings_payload()
+
+
+@app.delete("/api/settings/openai-key")
+def remove_openai_key() -> dict[str, object]:
+    if not settings.is_packaged:
+        raise HTTPException(
+            status_code=400,
+            detail="OpenAI key management is only available in packaged mode. Use .env in dev mode.",
+        )
+    if not keychain_available():
+        raise HTTPException(status_code=501, detail="macOS Keychain is not available on this system.")
+
+    try:
+        delete_openai_api_key()
+        refresh_runtime_state()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return current_settings_payload()
 
 
 @app.get("/api/jobs/status")
