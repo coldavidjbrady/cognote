@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from contextlib import closing
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 
 from .config import get_settings
 from .db import (
@@ -42,6 +44,32 @@ app.add_middleware(
 )
 
 
+def _frontend_ready() -> bool:
+    return settings.frontend_dist_dir.is_dir() and (settings.frontend_dist_dir / "index.html").exists()
+
+
+def _frontend_response(path: str = "") -> FileResponse | JSONResponse:
+    if not _frontend_ready():
+        return JSONResponse(
+            {
+                "detail": "Frontend build not found. Run `npm run build` in `frontend/` first.",
+                "frontend_dist_dir": str(settings.frontend_dist_dir),
+            },
+            status_code=503,
+        )
+
+    dist_dir = settings.frontend_dist_dir.resolve()
+    requested = path.lstrip("/")
+    if not requested:
+        return FileResponse(dist_dir / "index.html")
+
+    candidate = (dist_dir / requested).resolve(strict=False)
+    if candidate.is_file() and (candidate == dist_dir or dist_dir in candidate.parents):
+        return FileResponse(candidate)
+
+    return FileResponse(dist_dir / "index.html")
+
+
 @app.on_event("startup")
 def startup() -> None:
     with closing(connect(settings.db_path)) as conn:
@@ -55,6 +83,9 @@ def health() -> dict[str, object]:
         return {
             "status": "ok",
             "db_path": str(settings.db_path),
+            "runtime_mode": settings.runtime_mode,
+            "frontend_dist_dir": str(settings.frontend_dist_dir),
+            "frontend_ready": _frontend_ready(),
             "openai_enabled": embedding_service.enabled,
             "embeddings_indexed": count_embeddings(conn),
         }
@@ -368,3 +399,16 @@ def assistant_query(payload: AssistantQuery) -> dict[str, object]:
         "web_sources": result.web_sources,
         "context_notes": context_notes,
     }
+
+
+if settings.is_packaged:
+    @app.get("/", include_in_schema=False)
+    def frontend_root():
+        return _frontend_response()
+
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def frontend_catch_all(full_path: str):
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
+        return _frontend_response(full_path)

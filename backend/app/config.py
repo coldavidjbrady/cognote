@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
+APP_NAME = "Cognote"
+RuntimeMode = Literal["dev", "packaged"]
 DEFAULT_DB_PATH = BASE_DIR / "data" / "notes.db"
 DEFAULT_CORS_ORIGINS = (
     "http://127.0.0.1:5173",
@@ -32,9 +36,63 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _runtime_mode() -> RuntimeMode:
+    raw = (os.getenv("COGNOTE_RUNTIME_MODE") or "").strip().lower()
+    if raw == "packaged":
+        return "packaged"
+    if raw == "dev":
+        return "dev"
+    if getattr(sys, "frozen", False):
+        return "packaged"
+    return "dev"
+
+
+def _resource_root() -> Path:
+    bundled_root = getattr(sys, "_MEIPASS", None)
+    if bundled_root:
+        return Path(bundled_root).resolve()
+    return BASE_DIR
+
+
+def _default_app_support_dir() -> Path:
+    override = os.getenv("COGNOTE_APP_SUPPORT_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+    if sys.platform == "darwin":
+        return (Path.home() / "Library" / "Application Support" / APP_NAME).resolve()
+    return (Path.home() / f".{APP_NAME.lower()}").resolve()
+
+
+def _default_db_path(runtime_mode: RuntimeMode, app_support_dir: Path) -> Path:
+    if runtime_mode == "packaged":
+        return app_support_dir / "notes.db"
+    return DEFAULT_DB_PATH
+
+
+def _default_frontend_dist_dir(resource_root: Path) -> Path:
+    override = os.getenv("COGNOTE_FRONTEND_DIST_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+
+    candidates = (
+        resource_root / "frontend" / "dist",
+        resource_root / "dist",
+        BASE_DIR / "frontend" / "dist",
+    )
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.resolve()
+    return candidates[0].resolve()
+
+
 @dataclass(frozen=True)
 class Settings:
+    runtime_mode: RuntimeMode
+    source_root: Path
+    resource_root: Path
+    app_support_dir: Path
     db_path: Path
+    frontend_dist_dir: Path
     openai_api_key: str | None
     openai_embedding_model: str
     openai_chat_model: str
@@ -44,12 +102,29 @@ class Settings:
     semantic_min_score: float
     related_note_limit: int
 
+    @property
+    def is_packaged(self) -> bool:
+        return self.runtime_mode == "packaged"
+
+
+def clear_settings_cache() -> None:
+    get_settings.cache_clear()
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    db_path = Path(os.getenv("NOTES_DB_PATH", str(DEFAULT_DB_PATH))).expanduser().resolve()
+    runtime_mode = _runtime_mode()
+    app_support_dir = _default_app_support_dir()
+    db_path = Path(
+        os.getenv("NOTES_DB_PATH", str(_default_db_path(runtime_mode, app_support_dir)))
+    ).expanduser().resolve()
     return Settings(
+        runtime_mode=runtime_mode,
+        source_root=BASE_DIR,
+        resource_root=_resource_root(),
+        app_support_dir=app_support_dir,
         db_path=db_path,
+        frontend_dist_dir=_default_frontend_dist_dir(_resource_root()),
         openai_api_key=os.getenv("OPENAI_API_KEY") or None,
         openai_embedding_model=os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
         openai_chat_model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4.1-mini"),
