@@ -29,6 +29,7 @@ const SEARCH_MODES = [
   { id: "keyword", label: "Keyword" },
   { id: "semantic", label: "Semantic" },
 ];
+const NOTE_PAGE_SIZE = 60;
 
 function SetupExperience({
   settings,
@@ -281,6 +282,9 @@ export default function App() {
   const [searchMode, setSearchMode] = useState("hybrid");
   const [selectedCollectionId, setSelectedCollectionId] = useState(null);
   const [results, setResults] = useState([]);
+  const [hasMoreResults, setHasMoreResults] = useState(false);
+  const [nextResultsOffset, setNextResultsOffset] = useState(0);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [selectedNoteId, setSelectedNoteId] = useState(null);
   const [selectedNote, setSelectedNote] = useState(null);
   const [relatedNotes, setRelatedNotes] = useState([]);
@@ -363,6 +367,9 @@ export default function App() {
     if (!activeSearch && !showAllNotes) {
       setIsSearching(false);
       setErrorMessage("");
+      setHasMoreResults(false);
+      setNextResultsOffset(0);
+      setIsLoadingMore(false);
       if (!lastSearchText) {
         setResults([]);
       }
@@ -390,6 +397,8 @@ export default function App() {
       ? listNotes({
           collectionId: selectedCollectionId,
           archivedOnly: showArchivedOnly,
+          limit: NOTE_PAGE_SIZE,
+          offset: 0,
         })
       : searchNotes({
           query: deferredSearch,
@@ -405,8 +414,13 @@ export default function App() {
         }
         const nextResults = payload.results || [];
         setResults(nextResults);
+        setHasMoreResults(Boolean(payload.has_more));
+        setNextResultsOffset(payload.next_offset || 0);
+        setIsLoadingMore(false);
         if (!showAllNotes) {
           setLastSearchText(activeSearch);
+        } else {
+          setLastSearchText("");
         }
 
         if (!nextResults.length) {
@@ -434,6 +448,9 @@ export default function App() {
         if (!cancelled) {
           setErrorMessage(error.message);
           setResults([]);
+          setHasMoreResults(false);
+          setNextResultsOffset(0);
+          setIsLoadingMore(false);
         }
       })
       .finally(() => {
@@ -552,6 +569,30 @@ export default function App() {
     await deleteNoteLink(linkId);
     if (selectedNoteId) {
       await refreshNoteDetail(selectedNoteId);
+    }
+  }
+
+  async function handleLoadMoreResults() {
+    if (!showAllNotes || !hasMoreResults || isLoadingMore) {
+      return;
+    }
+    setIsLoadingMore(true);
+    setErrorMessage("");
+    try {
+      const payload = await listNotes({
+        collectionId: selectedCollectionId,
+        archivedOnly: showArchivedOnly,
+        limit: NOTE_PAGE_SIZE,
+        offset: nextResultsOffset,
+      });
+      const additionalResults = payload.results || [];
+      setResults((current) => [...current, ...additionalResults]);
+      setHasMoreResults(Boolean(payload.has_more));
+      setNextResultsOffset(payload.next_offset || 0);
+    } catch (error) {
+      setErrorMessage(error.message);
+    } finally {
+      setIsLoadingMore(false);
     }
   }
 
@@ -783,13 +824,16 @@ export default function App() {
             selectedNoteId={selectedNoteId}
             onSelectNote={(noteId) => startTransition(() => setSelectedNoteId(noteId))}
             onAssociateNote={handleAssociateNote}
-            activeQuery={deferredSearch}
-            lastSearchText={lastSearchText}
-            showAllNotes={showAllNotes}
-            isLoading={isSearching}
-            selectedCollection={selectedCollection}
-            archiveMode={showArchivedOnly}
-          />
+          activeQuery={deferredSearch}
+          lastSearchText={lastSearchText}
+          showAllNotes={showAllNotes}
+          isLoading={isSearching}
+          selectedCollection={selectedCollection}
+          archiveMode={showArchivedOnly}
+          hasMoreResults={showAllNotes && hasMoreResults}
+          isLoadingMore={isLoadingMore}
+          onLoadMore={handleLoadMoreResults}
+        />
 
           <NoteDetail
             note={selectedNote}

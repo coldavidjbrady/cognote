@@ -735,6 +735,8 @@ def list_notes(
     *,
     include_archived: bool = False,
     archived_only: bool = False,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
     query = """
         SELECT
@@ -772,6 +774,15 @@ def list_notes(
             n.modified_at_iso DESC,
             n.imported_at DESC
     """
+    if limit is not None:
+        query += " LIMIT ?"
+        params.append(limit)
+        if offset:
+            query += " OFFSET ?"
+            params.append(offset)
+    elif offset:
+        query += " LIMIT -1 OFFSET ?"
+        params.append(offset)
     rows = conn.execute(query, tuple(params)).fetchall()
     return rows_to_dicts(rows)
 

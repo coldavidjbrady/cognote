@@ -78,13 +78,19 @@ export function searchNotes({ query, mode, collectionId, archivedOnly = false })
   return request(`/api/search?${params.toString()}`);
 }
 
-export function listNotes({ collectionId, archivedOnly = false } = {}) {
+export function listNotes({ collectionId, archivedOnly = false, limit, offset } = {}) {
   const params = new URLSearchParams();
   if (collectionId) {
     params.set("collection_id", String(collectionId));
   }
   if (archivedOnly) {
     params.set("archived_only", "true");
+  }
+  if (typeof limit === "number") {
+    params.set("limit", String(limit));
+  }
+  if (typeof offset === "number" && offset > 0) {
+    params.set("offset", String(offset));
   }
   const queryString = params.toString();
   return request(queryString ? `/api/notes?${queryString}` : "/api/notes");

@@ -242,20 +242,35 @@ def notes(
     collection_id: int | None = Query(default=None),
     include_archived: bool = Query(default=False),
     archived_only: bool = Query(default=False),
+    limit: int | None = Query(default=None, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
 ) -> dict[str, object]:
     if archived_only:
         include_archived = True
     with closing(connect(settings.db_path)) as conn:
         init_db(conn)
+        effective_limit = limit + 1 if limit is not None else None
         results = list_notes(
             conn,
             collection_id=collection_id,
             include_archived=include_archived,
             archived_only=archived_only,
+            limit=effective_limit,
+            offset=offset,
         )
+        has_more = False
+        next_offset = None
+        if limit is not None and len(results) > limit:
+            results = results[:limit]
+            has_more = True
+            next_offset = offset + len(results)
         return {
             "count": len(results),
             "results": results,
+            "has_more": has_more,
+            "next_offset": next_offset,
+            "offset": offset,
+            "limit": limit,
         }
 
 

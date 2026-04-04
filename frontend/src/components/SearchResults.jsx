@@ -11,6 +11,9 @@ export default function SearchResults({
   isLoading,
   selectedCollection,
   archiveMode,
+  hasMoreResults,
+  isLoadingMore,
+  onLoadMore,
 }) {
   const trimmedQuery = activeQuery.trim();
   const heading = archiveMode
@@ -31,7 +34,9 @@ export default function SearchResults({
           <h2>{heading}</h2>
         </div>
         <span className="result-count">
-          {isLoading ? "Updating..." : `${results.length} ${archiveMode ? "archived" : "shown"}`}
+          {isLoading
+            ? "Updating..."
+            : `${results.length} ${archiveMode ? "archived" : "shown"}`}
         </span>
       </div>
 
@@ -108,6 +113,19 @@ export default function SearchResults({
             ) : null}
           </article>
         ))}
+
+        {hasMoreResults ? (
+          <div className="results-footer">
+            <button
+              className="ghost-button results-load-more"
+              onClick={onLoadMore}
+              type="button"
+              disabled={isLoadingMore}
+            >
+              {isLoadingMore ? "Loading more..." : "Load more notes"}
+            </button>
+          </div>
+        ) : null}
       </div>
     </section>
   );

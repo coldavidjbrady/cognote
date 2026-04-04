@@ -124,6 +124,40 @@ class ArchiveFilterEndpointTests(unittest.TestCase):
         self.assertEqual([item["title"] for item in archived_response.json()["results"]], ["Travel"])
         self.assertEqual(int(archived_response.json()["results"][0]["is_archived"]), 1)
 
+    def test_notes_endpoint_supports_pagination_for_library_views(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "notes.db"
+            with temporary_env(
+                COGNOTE_RUNTIME_MODE="dev",
+                NOTES_DB_PATH=str(db_path),
+            ):
+                import_notes_lines(
+                    [
+                        note_jsonl_line("note-1", "Recipe", "banana bread recipe"),
+                        note_jsonl_line("note-2", "Travel", "paris packing list"),
+                        note_jsonl_line("note-3", "Ideas", "garden layout sketch"),
+                    ],
+                    db_path,
+                )
+
+                config = importlib.import_module("backend.app.config")
+                config.clear_settings_cache()
+                main = self._load_main_module()
+
+                with TestClient(main.app) as client:
+                    first_page = client.get("/api/notes?limit=2")
+                    second_page = client.get("/api/notes?limit=2&offset=2")
+
+        self.assertEqual(first_page.status_code, 200)
+        self.assertEqual(first_page.json()["count"], 2)
+        self.assertTrue(first_page.json()["has_more"])
+        self.assertEqual(first_page.json()["next_offset"], 2)
+
+        self.assertEqual(second_page.status_code, 200)
+        self.assertEqual(second_page.json()["count"], 1)
+        self.assertFalse(second_page.json()["has_more"])
+        self.assertIsNone(second_page.json()["next_offset"])
+
 
 if __name__ == "__main__":
     unittest.main()
