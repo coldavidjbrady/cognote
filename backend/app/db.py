@@ -28,7 +28,10 @@ CREATE TABLE IF NOT EXISTS notes (
     fingerprint TEXT NOT NULL,
     imported_at TEXT NOT NULL,
     embedding_status TEXT NOT NULL DEFAULT 'pending',
-    embedding_updated_at TEXT
+    embedding_updated_at TEXT,
+    is_archived INTEGER NOT NULL DEFAULT 0,
+    archived_at TEXT,
+    last_seen_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_notes_folder ON notes(folder);
@@ -100,8 +103,48 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
 
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA_SQL)
+    ensure_notes_archive_columns(conn)
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_notes_archived
+        ON notes(is_archived, modified_at_iso DESC, imported_at DESC)
+        """
+    )
     rebuild_notes_fts(conn)
     conn.commit()
+
+
+def ensure_notes_archive_columns(conn: sqlite3.Connection) -> None:
+    columns = {
+        row["name"]: row for row in conn.execute("PRAGMA table_info(notes)").fetchall()
+    }
+    if "is_archived" not in columns:
+        conn.execute("ALTER TABLE notes ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0")
+    if "archived_at" not in columns:
+        conn.execute("ALTER TABLE notes ADD COLUMN archived_at TEXT")
+    if "last_seen_at" not in columns:
+        conn.execute("ALTER TABLE notes ADD COLUMN last_seen_at TEXT")
+    conn.execute(
+        """
+        UPDATE notes
+        SET is_archived = COALESCE(is_archived, 0),
+            last_seen_at = COALESCE(last_seen_at, imported_at)
+        """
+    )
+
+
+def archive_filter_clause(
+    alias: str,
+    *,
+    include_archived: bool = False,
+    archived_only: bool = False,
+) -> str | None:
+    archived_column = f"COALESCE({alias}.is_archived, 0)"
+    if archived_only:
+        return f"{archived_column} = 1"
+    if include_archived:
+        return None
+    return f"{archived_column} = 0"
 
 
 def rebuild_notes_fts(conn: sqlite3.Connection) -> None:
@@ -202,6 +245,7 @@ def note_embedding_input(note: dict[str, Any]) -> str:
 
 def upsert_note(conn: sqlite3.Connection, payload: dict[str, Any]) -> tuple[int, bool]:
     imported_at = utc_now()
+    last_seen_at = imported_at
     fingerprint = note_fingerprint(payload)
     created_iso = parse_datetime(payload.get("created"))
     modified_iso = parse_datetime(payload.get("modified"))
@@ -239,11 +283,12 @@ def upsert_note(conn: sqlite3.Connection, payload: dict[str, Any]) -> tuple[int,
                 source_created_at, source_modified_at,
                 created_at_iso, modified_at_iso,
                 body_text, body_html, word_count, char_count,
-                fingerprint, imported_at, embedding_status
+                fingerprint, imported_at, embedding_status,
+                is_archived, archived_at, last_seen_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            values + (embedding_status,),
+            values + (embedding_status, 0, None, last_seen_at),
         )
         note_id = int(cursor.lastrowid)
     else:
@@ -265,7 +310,10 @@ def upsert_note(conn: sqlite3.Connection, payload: dict[str, Any]) -> tuple[int,
                 fingerprint = ?,
                 imported_at = ?,
                 embedding_status = ?,
-                embedding_updated_at = CASE WHEN ? = 'pending' THEN NULL ELSE embedding_updated_at END
+                embedding_updated_at = CASE WHEN ? = 'pending' THEN NULL ELSE embedding_updated_at END,
+                is_archived = 0,
+                archived_at = NULL,
+                last_seen_at = ?
             WHERE id = ?
             """,
             (
@@ -284,6 +332,7 @@ def upsert_note(conn: sqlite3.Connection, payload: dict[str, Any]) -> tuple[int,
                 imported_at,
                 embedding_status,
                 embedding_status,
+                last_seen_at,
                 note_id,
             ),
         )
@@ -299,12 +348,44 @@ def upsert_note(conn: sqlite3.Connection, payload: dict[str, Any]) -> tuple[int,
     return note_id, changed
 
 
+def archive_missing_notes(
+    conn: sqlite3.Connection,
+    seen_source_note_ids: set[str],
+    archived_at: str | None = None,
+) -> int:
+    archived_at = archived_at or utc_now()
+    if seen_source_note_ids:
+        placeholders = ", ".join("?" for _ in seen_source_note_ids)
+        query = f"""
+            UPDATE notes
+            SET is_archived = 1,
+                archived_at = COALESCE(archived_at, ?)
+            WHERE COALESCE(is_archived, 0) = 0
+              AND source_note_id NOT IN ({placeholders})
+        """
+        params: list[Any] = [archived_at, *sorted(seen_source_note_ids)]
+    else:
+        query = """
+            UPDATE notes
+            SET is_archived = 1,
+                archived_at = COALESCE(archived_at, ?)
+            WHERE COALESCE(is_archived, 0) = 0
+        """
+        params = [archived_at]
+
+    cursor = conn.execute(query, tuple(params))
+    archived_count = int(cursor.rowcount or 0)
+    conn.commit()
+    return archived_count
+
+
 def fetch_pending_embeddings(conn: sqlite3.Connection, limit: int = 100) -> list[dict[str, Any]]:
     rows = conn.execute(
         """
         SELECT id, title, body_text
         FROM notes
         WHERE embedding_status = 'pending'
+          AND COALESCE(is_archived, 0) = 0
         ORDER BY imported_at DESC
         LIMIT ?
         """,
@@ -345,7 +426,14 @@ def store_embedding(
 
 
 def count_embeddings(conn: sqlite3.Connection) -> int:
-    row = conn.execute("SELECT COUNT(*) AS count FROM note_embeddings").fetchone()
+    row = conn.execute(
+        """
+        SELECT COUNT(*) AS count
+        FROM note_embeddings e
+        JOIN notes n ON n.id = e.note_id
+        WHERE COALESCE(n.is_archived, 0) = 0
+        """
+    ).fetchone()
     return int(row["count"]) if row else 0
 
 
@@ -358,9 +446,10 @@ def list_collections(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             c.description,
             c.color,
             c.created_at,
-            COUNT(cn.note_id) AS note_count
+            COUNT(n.id) AS note_count
         FROM collections c
         LEFT JOIN collection_notes cn ON cn.collection_id = c.id
+        LEFT JOIN notes n ON n.id = cn.note_id AND COALESCE(n.is_archived, 0) = 0
         GROUP BY c.id
         ORDER BY LOWER(c.name)
         """
@@ -508,7 +597,9 @@ def get_manual_links(conn: sqlite3.Connection, note_id: int) -> list[dict[str, A
             linked.folder,
             linked.account,
             linked.source_modified_at AS modified_at_display,
-            linked.modified_at_iso
+            linked.modified_at_iso,
+            COALESCE(linked.is_archived, 0) AS is_archived,
+            linked.archived_at
         FROM note_links nl
         JOIN notes linked
             ON linked.id = CASE
@@ -540,7 +631,10 @@ def get_note(conn: sqlite3.Connection, note_id: int) -> dict[str, Any] | None:
             word_count,
             char_count,
             embedding_status,
-            imported_at
+            imported_at,
+            COALESCE(is_archived, 0) AS is_archived,
+            archived_at,
+            last_seen_at
         FROM notes
         WHERE id = ?
         """,
@@ -559,12 +653,13 @@ def get_overview(conn: sqlite3.Connection) -> dict[str, Any]:
     counts = conn.execute(
         """
         SELECT
-            COUNT(*) AS total_notes,
-            COUNT(DISTINCT account) AS total_accounts,
-            COUNT(DISTINCT folder) AS total_folders,
-            COALESCE(SUM(word_count), 0) AS total_words,
-            COALESCE(SUM(char_count), 0) AS total_characters,
-            COALESCE(SUM(CASE WHEN embedding_status = 'ready' THEN 1 ELSE 0 END), 0) AS notes_with_embeddings
+            COALESCE(SUM(CASE WHEN COALESCE(is_archived, 0) = 0 THEN 1 ELSE 0 END), 0) AS total_notes,
+            COUNT(DISTINCT CASE WHEN COALESCE(is_archived, 0) = 0 THEN account END) AS total_accounts,
+            COUNT(DISTINCT CASE WHEN COALESCE(is_archived, 0) = 0 THEN folder END) AS total_folders,
+            COALESCE(SUM(CASE WHEN COALESCE(is_archived, 0) = 0 THEN word_count ELSE 0 END), 0) AS total_words,
+            COALESCE(SUM(CASE WHEN COALESCE(is_archived, 0) = 0 THEN char_count ELSE 0 END), 0) AS total_characters,
+            COALESCE(SUM(CASE WHEN COALESCE(is_archived, 0) = 0 AND embedding_status = 'ready' THEN 1 ELSE 0 END), 0) AS notes_with_embeddings,
+            COALESCE(SUM(CASE WHEN COALESCE(is_archived, 0) = 1 THEN 1 ELSE 0 END), 0) AS archived_notes
         FROM notes
         """
     ).fetchone()
@@ -573,6 +668,7 @@ def get_overview(conn: sqlite3.Connection) -> dict[str, Any]:
         """
         SELECT folder, COUNT(*) AS note_count
         FROM notes
+        WHERE COALESCE(is_archived, 0) = 0
         GROUP BY folder
         ORDER BY note_count DESC, LOWER(folder)
         LIMIT 6
@@ -589,6 +685,9 @@ def get_recent_notes(
     conn: sqlite3.Connection,
     limit: int = 20,
     collection_id: int | None = None,
+    *,
+    include_archived: bool = False,
+    archived_only: bool = False,
 ) -> list[dict[str, Any]]:
     query = """
         SELECT
@@ -604,9 +703,20 @@ def get_recent_notes(
         FROM notes n
     """
     params: list[Any] = []
+    clauses: list[str] = []
+    archive_clause = archive_filter_clause(
+        "n",
+        include_archived=include_archived,
+        archived_only=archived_only,
+    )
+    if archive_clause:
+        clauses.append(archive_clause)
     if collection_id is not None:
-        query += " JOIN collection_notes cn ON cn.note_id = n.id WHERE cn.collection_id = ?"
+        query += " JOIN collection_notes cn ON cn.note_id = n.id"
+        clauses.append("cn.collection_id = ?")
         params.append(collection_id)
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
     query += """
         ORDER BY
             CASE WHEN n.modified_at_iso IS NULL THEN 1 ELSE 0 END,
@@ -622,6 +732,9 @@ def get_recent_notes(
 def list_notes(
     conn: sqlite3.Connection,
     collection_id: int | None = None,
+    *,
+    include_archived: bool = False,
+    archived_only: bool = False,
 ) -> list[dict[str, Any]]:
     query = """
         SELECT
@@ -637,9 +750,20 @@ def list_notes(
         FROM notes n
     """
     params: list[Any] = []
+    clauses: list[str] = []
+    archive_clause = archive_filter_clause(
+        "n",
+        include_archived=include_archived,
+        archived_only=archived_only,
+    )
+    if archive_clause:
+        clauses.append(archive_clause)
     if collection_id is not None:
-        query += " JOIN collection_notes cn ON cn.note_id = n.id WHERE cn.collection_id = ?"
+        query += " JOIN collection_notes cn ON cn.note_id = n.id"
+        clauses.append("cn.collection_id = ?")
         params.append(collection_id)
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
     query += """
         ORDER BY
             CASE WHEN n.modified_at_iso IS NULL THEN 1 ELSE 0 END,
@@ -657,6 +781,9 @@ def list_notes_by_date_range(
     date_fields: tuple[str, ...] = ("created_at_iso", "modified_at_iso"),
     collection_id: int | None = None,
     limit: int | None = None,
+    *,
+    include_archived: bool = False,
+    archived_only: bool = False,
 ) -> list[dict[str, Any]]:
     supported_fields = {
         "created_at_iso": "n.created_at_iso",
@@ -699,6 +826,13 @@ def list_notes_by_date_range(
     """
 
     where_clauses = [f"({' OR '.join(comparator_clauses)})"]
+    archive_clause = archive_filter_clause(
+        "n",
+        include_archived=include_archived,
+        archived_only=archived_only,
+    )
+    if archive_clause:
+        where_clauses.append(archive_clause)
     if collection_id is not None:
         query += " JOIN collection_notes cn ON cn.note_id = n.id"
         where_clauses.append("cn.collection_id = ?")
@@ -723,6 +857,9 @@ def keyword_search(
     query: str,
     limit: int = 20,
     collection_id: int | None = None,
+    *,
+    include_archived: bool = False,
+    archived_only: bool = False,
 ) -> list[dict[str, Any]]:
     search_sql = """
         SELECT
@@ -745,13 +882,22 @@ def keyword_search(
     if collection_id is not None:
         search_sql += " JOIN collection_notes cn ON cn.note_id = n.id"
 
-    search_sql += " WHERE notes_fts MATCH ?"
+    clauses = ["notes_fts MATCH ?"]
     params.append(query)
 
+    archive_clause = archive_filter_clause(
+        "n",
+        include_archived=include_archived,
+        archived_only=archived_only,
+    )
+    if archive_clause:
+        clauses.append(archive_clause)
+
     if collection_id is not None:
-        search_sql += " AND cn.collection_id = ?"
+        clauses.append("cn.collection_id = ?")
         params.append(collection_id)
 
+    search_sql += " WHERE " + " AND ".join(clauses)
     search_sql += " ORDER BY raw_score LIMIT ?"
     params.append(limit)
 
@@ -773,6 +919,9 @@ def get_embeddings(
     conn: sqlite3.Connection,
     collection_id: int | None = None,
     exclude_note_id: int | None = None,
+    *,
+    include_archived: bool = False,
+    archived_only: bool = False,
 ) -> list[dict[str, Any]]:
     query = """
         SELECT
@@ -789,6 +938,13 @@ def get_embeddings(
     """
     clauses: list[str] = []
     params: list[Any] = []
+    archive_clause = archive_filter_clause(
+        "n",
+        include_archived=include_archived,
+        archived_only=archived_only,
+    )
+    if archive_clause:
+        clauses.append(archive_clause)
 
     if collection_id is not None:
         query += " JOIN collection_notes cn ON cn.note_id = n.id"

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -12,13 +11,13 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from backend.app.config import get_settings
+from backend.app.importer import import_notes_file
 from backend.app.db import (
     connect,
     fetch_pending_embeddings,
     init_db,
     note_embedding_input,
     store_embedding,
-    upsert_note,
 )
 from backend.app.embeddings import EmbeddingService
 
@@ -48,27 +47,6 @@ def parse_args() -> argparse.Namespace:
         help="How many pending notes to embed per batch",
     )
     return parser.parse_args()
-
-
-def import_notes(jsonl_path: Path, db_path: Path) -> tuple[int, int]:
-    conn = connect(db_path)
-    init_db(conn)
-    imported = 0
-    changed = 0
-
-    with jsonl_path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            if not line.strip():
-                continue
-            payload = json.loads(line)
-            _, did_change = upsert_note(conn, payload)
-            imported += 1
-            if did_change:
-                changed += 1
-
-    conn.close()
-    return imported, changed
-
 
 def embed_pending_notes(db_path: Path, batch_size: int) -> int:
     settings = get_settings()
@@ -104,9 +82,10 @@ def main() -> int:
         print(f"JSONL file not found: {jsonl_path}")
         return 2
 
-    imported, changed = import_notes(jsonl_path, db_path)
+    imported, changed, archived = import_notes_file(jsonl_path, db_path)
     print(f"Imported {imported} notes into {db_path}.")
     print(f"Changed or new notes: {changed}.")
+    print(f"Archived missing notes: {archived}.")
 
     if not args.skip_embeddings:
         embedded = embed_pending_notes(db_path, batch_size=args.embedding_batch_size)

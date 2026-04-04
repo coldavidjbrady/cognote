@@ -214,11 +214,21 @@ def _keyword_search_with_fallbacks(
     query: str,
     limit: int,
     collection_id: int | None = None,
+    *,
+    include_archived: bool = False,
+    archived_only: bool = False,
 ) -> list[dict[str, Any]]:
     merged: dict[int, dict[str, Any]] = {}
     for candidate in _keyword_query_variants(query):
         try:
-            rows = keyword_search(conn, candidate, limit=limit, collection_id=collection_id)
+            rows = keyword_search(
+                conn,
+                candidate,
+                limit=limit,
+                collection_id=collection_id,
+                include_archived=include_archived,
+                archived_only=archived_only,
+            )
         except sqlite3.OperationalError:
             # Some raw natural-language forms are not valid FTS syntax.
             # Continue through normalized fallback variants.
@@ -235,6 +245,8 @@ def _keyword_search_with_fallbacks(
             limit=limit - len(merged),
             collection_id=collection_id,
             exclude_note_ids=set(merged.keys()),
+            include_archived=include_archived,
+            archived_only=archived_only,
         ):
             merged[int(item["id"])] = item
     return list(merged.values())[:limit]
@@ -250,6 +262,9 @@ def _loose_keyword_matches(
     limit: int,
     collection_id: int | None,
     exclude_note_ids: set[int],
+    *,
+    include_archived: bool = False,
+    archived_only: bool = False,
 ) -> list[dict[str, Any]]:
     if limit <= 0:
         return []
@@ -275,9 +290,17 @@ def _loose_keyword_matches(
         FROM notes n
     """
     params: list[Any] = []
+    clauses: list[str] = []
+    if archived_only:
+        clauses.append("COALESCE(n.is_archived, 0) = 1")
+    elif not include_archived:
+        clauses.append("COALESCE(n.is_archived, 0) = 0")
     if collection_id is not None:
-        sql += " JOIN collection_notes cn ON cn.note_id = n.id WHERE cn.collection_id = ?"
+        sql += " JOIN collection_notes cn ON cn.note_id = n.id"
+        clauses.append("cn.collection_id = ?")
         params.append(collection_id)
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
     sql += """
         ORDER BY
             CASE WHEN n.modified_at_iso IS NULL THEN 1 ELSE 0 END,
@@ -324,6 +347,9 @@ def semantic_search(
     query: str,
     limit: int = 20,
     collection_id: int | None = None,
+    *,
+    include_archived: bool = False,
+    archived_only: bool = False,
 ) -> list[dict[str, Any]]:
     if not embedding_service.enabled or not query.strip():
         return []
@@ -335,6 +361,8 @@ def semantic_search(
     candidates = get_embeddings(
         conn,
         collection_id=collection_id,
+        include_archived=include_archived,
+        archived_only=archived_only,
     )
     scored: list[dict[str, Any]] = []
     for item in candidates:
@@ -358,10 +386,19 @@ def hybrid_search(
     mode: str = "hybrid",
     limit: int = 20,
     collection_id: int | None = None,
+    *,
+    include_archived: bool = False,
+    archived_only: bool = False,
 ) -> list[dict[str, Any]]:
     clean_query = query.strip()
     if not clean_query:
-        items = get_recent_notes(conn, limit=limit, collection_id=collection_id)
+        items = get_recent_notes(
+            conn,
+            limit=limit,
+            collection_id=collection_id,
+            include_archived=include_archived,
+            archived_only=archived_only,
+        )
         for item in items:
             item["snippet"] = _safe_snippet(item.get("snippet"))
         return items
@@ -375,6 +412,8 @@ def hybrid_search(
             date_fields=date_query["date_fields"],
             collection_id=collection_id,
             limit=None if date_query["wants_all"] else limit,
+            include_archived=include_archived,
+            archived_only=archived_only,
         )
         for item in items:
             item["snippet"] = _safe_snippet(item.get("snippet"))
@@ -388,6 +427,8 @@ def hybrid_search(
                 clean_query,
                 limit=max(limit * 3, 30),
                 collection_id=collection_id,
+                include_archived=include_archived,
+                archived_only=archived_only,
             )
         except sqlite3.OperationalError:
             keyword_results = []
@@ -401,6 +442,8 @@ def hybrid_search(
             clean_query,
             limit=max(limit * 3, 30),
             collection_id=collection_id,
+            include_archived=include_archived,
+            archived_only=archived_only,
         )
 
     if mode == "keyword":
@@ -455,13 +498,26 @@ def related_notes(
     conn: sqlite3.Connection,
     note_id: int,
     limit: int,
+    *,
+    include_archived: bool = False,
+    archived_only: bool = False,
 ) -> list[dict[str, Any]]:
     base_vector = get_note_embedding(conn, note_id)
     if not base_vector:
-        items = get_recent_notes(conn, limit=limit + 1)
+        items = get_recent_notes(
+            conn,
+            limit=limit + 1,
+            include_archived=include_archived,
+            archived_only=archived_only,
+        )
         return [item for item in items if item["id"] != note_id][:limit]
 
-    candidates = get_embeddings(conn, exclude_note_id=note_id)
+    candidates = get_embeddings(
+        conn,
+        exclude_note_id=note_id,
+        include_archived=include_archived,
+        archived_only=archived_only,
+    )
     for item in candidates:
         similarity = cosine_similarity(base_vector, item["vector"])
         item["semantic_score"] = (similarity + 1) / 2
