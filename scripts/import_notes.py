@@ -11,15 +11,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from backend.app.config import get_settings
-from backend.app.importer import import_notes_file
-from backend.app.db import (
-    connect,
-    fetch_pending_embeddings,
-    init_db,
-    note_embedding_input,
-    store_embedding,
-)
-from backend.app.embeddings import EmbeddingService
+from backend.app.importer import embed_pending_notes, import_notes_file
 
 
 def parse_args() -> argparse.Namespace:
@@ -47,36 +39,11 @@ def parse_args() -> argparse.Namespace:
         help="How many pending notes to embed per batch",
     )
     return parser.parse_args()
-
-def embed_pending_notes(db_path: Path, batch_size: int) -> int:
-    settings = get_settings()
-    service = EmbeddingService(settings)
-    if not service.enabled:
-        print("OPENAI_API_KEY is not set; skipping embeddings.")
-        return 0
-
-    conn = connect(db_path)
-    init_db(conn)
-    embedded = 0
-
-    while True:
-        batch = fetch_pending_embeddings(conn, limit=batch_size)
-        if not batch:
-            break
-        texts = [note_embedding_input(note) for note in batch]
-        vectors = service.embed_texts(texts)
-        for note, vector in zip(batch, vectors):
-            store_embedding(conn, int(note["id"]), service.model, vector)
-            embedded += 1
-
-    conn.close()
-    return embedded
-
-
 def main() -> int:
     args = parse_args()
     jsonl_path = Path(args.jsonl).expanduser().resolve()
     db_path = Path(args.db).expanduser().resolve()
+    settings = get_settings()
 
     if not jsonl_path.exists():
         print(f"JSONL file not found: {jsonl_path}")
@@ -88,7 +55,9 @@ def main() -> int:
     print(f"Archived missing notes: {archived}.")
 
     if not args.skip_embeddings:
-        embedded = embed_pending_notes(db_path, batch_size=args.embedding_batch_size)
+        embedded = embed_pending_notes(db_path, settings, batch_size=args.embedding_batch_size)
+        if not settings.openai_api_key:
+            print("OPENAI_API_KEY is not set; skipping embeddings.")
         print(f"Embedded {embedded} notes.")
 
     return 0

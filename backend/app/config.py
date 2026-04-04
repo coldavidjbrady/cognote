@@ -85,6 +85,30 @@ def _default_frontend_dist_dir(resource_root: Path) -> Path:
     return candidates[0].resolve()
 
 
+def _default_exports_root_dir(runtime_mode: RuntimeMode, source_root: Path, app_support_dir: Path) -> Path:
+    override = os.getenv("COGNOTE_EXPORTS_ROOT_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+    if runtime_mode == "packaged":
+        return (app_support_dir / "exports").resolve()
+    return (source_root / "notes-export").resolve()
+
+
+def _default_exporter_script_path(resource_root: Path, source_root: Path) -> Path:
+    override = os.getenv("COGNOTE_EXPORTER_SCRIPT_PATH")
+    if override:
+        return Path(override).expanduser().resolve()
+
+    candidates = (
+        resource_root / "apple_notes_exporter_v4.py",
+        source_root / "apple_notes_exporter_v4.py",
+    )
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.resolve()
+    return candidates[0].resolve()
+
+
 @dataclass(frozen=True)
 class Settings:
     runtime_mode: RuntimeMode
@@ -93,6 +117,8 @@ class Settings:
     app_support_dir: Path
     db_path: Path
     frontend_dist_dir: Path
+    exports_root_dir: Path
+    exporter_script_path: Path
     openai_api_key: str | None
     openai_embedding_model: str
     openai_chat_model: str
@@ -101,6 +127,7 @@ class Settings:
     semantic_candidate_limit: int
     semantic_min_score: float
     related_note_limit: int
+    embedding_batch_size: int
 
     @property
     def is_packaged(self) -> bool:
@@ -115,16 +142,19 @@ def clear_settings_cache() -> None:
 def get_settings() -> Settings:
     runtime_mode = _runtime_mode()
     app_support_dir = _default_app_support_dir()
+    resource_root = _resource_root()
     db_path = Path(
         os.getenv("NOTES_DB_PATH", str(_default_db_path(runtime_mode, app_support_dir)))
     ).expanduser().resolve()
     return Settings(
         runtime_mode=runtime_mode,
         source_root=BASE_DIR,
-        resource_root=_resource_root(),
+        resource_root=resource_root,
         app_support_dir=app_support_dir,
         db_path=db_path,
-        frontend_dist_dir=_default_frontend_dist_dir(_resource_root()),
+        frontend_dist_dir=_default_frontend_dist_dir(resource_root),
+        exports_root_dir=_default_exports_root_dir(runtime_mode, BASE_DIR, app_support_dir),
+        exporter_script_path=_default_exporter_script_path(resource_root, BASE_DIR),
         openai_api_key=os.getenv("OPENAI_API_KEY") or None,
         openai_embedding_model=os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
         openai_chat_model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4.1-mini"),
@@ -133,4 +163,5 @@ def get_settings() -> Settings:
         semantic_candidate_limit=int(os.getenv("SEMANTIC_CANDIDATE_LIMIT", "250")),
         semantic_min_score=max(0.0, min(1.0, _env_float("SEMANTIC_MIN_SCORE", 0.64))),
         related_note_limit=int(os.getenv("RELATED_NOTE_LIMIT", "6")),
+        embedding_batch_size=int(os.getenv("EMBEDDING_BATCH_SIZE", "50")),
     )

@@ -25,14 +25,22 @@ from .db import (
     remove_note_from_collection,
 )
 from .embeddings import EmbeddingService
+from .jobs import SyncJobManager
 from .llm import LLMService
-from .schemas import AssistantQuery, CollectionCreate, CollectionNoteAdd, NoteLinkCreate
+from .schemas import (
+    AssistantQuery,
+    CollectionCreate,
+    CollectionNoteAdd,
+    NoteLinkCreate,
+    SyncRunRequest,
+)
 from .search import cosine_similarity, hybrid_search, related_notes
 
 
 settings = get_settings()
 embedding_service = EmbeddingService(settings)
 llm_service = LLMService(settings)
+sync_job_manager = SyncJobManager(settings)
 app = FastAPI(title="Apple Notes Search API", version="0.1.0")
 
 app.add_middleware(
@@ -85,10 +93,34 @@ def health() -> dict[str, object]:
             "db_path": str(settings.db_path),
             "runtime_mode": settings.runtime_mode,
             "frontend_dist_dir": str(settings.frontend_dist_dir),
+            "exports_root_dir": str(settings.exports_root_dir),
             "frontend_ready": _frontend_ready(),
             "openai_enabled": embedding_service.enabled,
             "embeddings_indexed": count_embeddings(conn),
         }
+
+
+@app.get("/api/jobs/status")
+def jobs_status() -> dict[str, object]:
+    status = sync_job_manager.get_status()
+    status["openai_enabled"] = embedding_service.enabled
+    return status
+
+
+@app.post("/api/jobs/setup")
+def start_setup_job(payload: SyncRunRequest) -> dict[str, object]:
+    try:
+        return sync_job_manager.start_setup(payload)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/jobs/sync")
+def start_sync_job(payload: SyncRunRequest) -> dict[str, object]:
+    try:
+        return sync_job_manager.start_sync(payload)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.get("/api/overview")

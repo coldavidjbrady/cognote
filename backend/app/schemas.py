@@ -35,3 +35,11 @@ class AssistantQuery(BaseModel):
     include_linked_notes: bool = True
     history: list[AssistantMessage] = Field(default_factory=list)
     previous_response_id: str | None = None
+
+
+class SyncRunRequest(BaseModel):
+    account: str | None = Field(default=None, max_length=120)
+    skip_embeddings: bool = False
+    skip_xlsx: bool = False
+    resume_export: bool = False
+    progress_every: int = Field(default=25, ge=0, le=500)
