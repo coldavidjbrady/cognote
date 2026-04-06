@@ -94,10 +94,19 @@ export default function Sidebar({
               <span>{jobStatus.import_summary.imported} imported</span>
               <span>{jobStatus.import_summary.changed} changed</span>
               <span>{jobStatus.import_summary.archived} archived</span>
+              <span>{jobStatus.import_summary.failed || 0} skipped</span>
             </div>
           ) : null}
+          {jobStatus?.import_error_log_path ? (
+            <p className="muted">Skipped-note log saved to: {jobStatus.import_error_log_path}</p>
+          ) : null}
           {jobStatus?.status === "failed" && jobStatus?.error ? (
-            <p className="sync-error">{jobStatus.error}</p>
+            <>
+              <p className="sync-error">{jobStatus.error}</p>
+              {jobStatus?.log_path ? (
+                <p className="muted">Diagnostic log saved to: {jobStatus.log_path}</p>
+              ) : null}
+            </>
           ) : null}
         </div>
       </section>

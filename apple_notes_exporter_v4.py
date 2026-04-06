@@ -41,6 +41,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 US = chr(31)  # field separator
 RS = chr(30)  # record separator
 GS = chr(29)  # folder-path segment separator
+ILLEGAL_XLSX_CHAR_RE = re.compile(r"[\000-\010]|[\013-\014]|[\016-\037]")
 
 
 LIST_FOLDERS_SCRIPT = r'''
@@ -275,6 +276,141 @@ return output
 '''
 
 
+FETCH_ALL_NOTES_TEMPLATE = r'''
+use scripting additions
+
+property fieldSep : character id 31
+property recordSep : character id 30
+property pathSep : character id 29
+
+on esc(theText)
+    if theText is missing value then set theText to ""
+    set t to theText as text
+
+    set AppleScript's text item delimiters to "\\"
+    set t to every text item of t
+    set AppleScript's text item delimiters to "\\\\"
+    set t to t as text
+
+    set AppleScript's text item delimiters to fieldSep
+    set t to every text item of t
+    set AppleScript's text item delimiters to "\\u001f"
+    set t to t as text
+
+    set AppleScript's text item delimiters to recordSep
+    set t to every text item of t
+    set AppleScript's text item delimiters to "\\u001e"
+    set t to t as text
+
+    set AppleScript's text item delimiters to pathSep
+    set t to every text item of t
+    set AppleScript's text item delimiters to "\\u001d"
+    set t to t as text
+
+    set AppleScript's text item delimiters to "\""
+    set t to every text item of t
+    set AppleScript's text item delimiters to "\\\""
+    set t to t as text
+
+    set AppleScript's text item delimiters to return
+    set t to every text item of t
+    set AppleScript's text item delimiters to "\\n"
+    set t to t as text
+
+    set AppleScript's text item delimiters to linefeed
+    set t to every text item of t
+    set AppleScript's text item delimiters to "\\n"
+    set t to t as text
+
+    set AppleScript's text item delimiters to tab
+    set t to every text item of t
+    set AppleScript's text item delimiters to "\\t"
+    set t to t as text
+
+    set AppleScript's text item delimiters to ""
+    return t
+end esc
+
+on joinPath(pathText, folderName)
+    if pathText is "" then
+        return folderName
+    end if
+    return pathText & pathSep & folderName
+end joinPath
+
+on appendNotes(folderRef, accName, folderPath, output)
+    repeat with n in notes of folderRef
+        try
+            set noteName to name of n as text
+        on error
+            set noteName to ""
+        end try
+
+        try
+            set noteBody to body of n as text
+        on error
+            set noteBody to ""
+        end try
+
+        try
+            set creationDate to creation date of n as text
+        on error
+            set creationDate to ""
+        end try
+
+        try
+            set modificationDate to modification date of n as text
+        on error
+            set modificationDate to ""
+        end try
+
+        try
+            set noteID to id of n as text
+        on error
+            set noteID to ""
+        end try
+
+        set output to output & my esc(accName) & fieldSep & my esc(folderPath) & fieldSep & my esc(noteID) & fieldSep & my esc(noteName) & fieldSep & my esc(creationDate) & fieldSep & my esc(modificationDate) & fieldSep & my esc(noteBody) & recordSep
+    end repeat
+    return output
+end appendNotes
+
+on walkFolders(folderList, accName, currentPath, output)
+    repeat with f in folderList
+        set folderName to ""
+        try
+            set folderName to name of f as text
+        end try
+
+        set nextPath to my joinPath(currentPath, folderName)
+        set output to my appendNotes(f, accName, nextPath, output)
+        try
+            set output to my walkFolders(folders of f, accName, nextPath, output)
+        end try
+    end repeat
+    return output
+end walkFolders
+
+set accountNameFilter to __ACCOUNT_NAME_FILTER__
+
+tell application "Notes"
+    set output to ""
+    repeat with acc in accounts
+        set accName to ""
+        try
+            set accName to name of acc as text
+        end try
+
+        if accountNameFilter is "" or accName is accountNameFilter then
+            set output to my walkFolders(folders of acc, accName, "", output)
+        end if
+    end repeat
+end tell
+
+return output
+'''
+
+
 @dataclass
 class NoteRecord:
     account: str
@@ -394,6 +530,16 @@ def fetch_folder_notes(account: str, folder_path: str) -> Iterator[NoteRecord]:
     return parse_note_records(raw)
 
 
+def fetch_all_notes(account_filter: Optional[str]) -> List[NoteRecord]:
+    account_name_filter = account_filter or ""
+    script = FETCH_ALL_NOTES_TEMPLATE.replace(
+        "__ACCOUNT_NAME_FILTER__",
+        applescript_string_literal(account_name_filter),
+    )
+    raw = run_osascript(script)
+    return list(parse_note_records(raw))
+
+
 def ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
@@ -414,6 +560,83 @@ def save_state(path: Path, completed_folders: List[str], stats: Dict[str, object
         "stats": stats,
     }
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def write_csv_records(notes: List[NoteRecord], path: Path) -> None:
+    with path.open("w", newline="", encoding="utf-8") as csv_file:
+        csv_writer = csv.DictWriter(
+            csv_file,
+            fieldnames=[
+                "account",
+                "folder",
+                "id",
+                "title",
+                "created",
+                "modified",
+                "body_html",
+                "body_text",
+                "word_count",
+                "char_count",
+            ],
+        )
+        csv_writer.writeheader()
+        for note in notes:
+            csv_writer.writerow(asdict(note))
+
+
+def write_jsonl_records(notes: List[NoteRecord], path: Path) -> None:
+    with path.open("w", encoding="utf-8") as jsonl_file:
+        for note in notes:
+            jsonl_file.write(json.dumps(asdict(note), ensure_ascii=False) + "\n")
+
+
+def write_markdown_records(notes: List[NoteRecord], path: Path) -> None:
+    with path.open("w", encoding="utf-8") as md_file:
+        md_file.write("# Apple Notes Export\n\n")
+        md_file.write(f"Export started: {datetime.now().isoformat()}\n\n")
+        for note in notes:
+            md_file.write(f"---\n\n## {note.title or '(Untitled)'}\n\n")
+            md_file.write(f"- Account: {note.account}\n")
+            md_file.write(f"- Folder: {note.folder}\n")
+            md_file.write(f"- ID: {note.id}\n")
+            md_file.write(f"- Created: {note.created}\n")
+            md_file.write(f"- Modified: {note.modified}\n")
+            md_file.write(f"- Words: {note.word_count}\n\n")
+            if note.body_text:
+                md_file.write(note.body_text)
+                md_file.write("\n\n")
+
+
+def write_xlsx_records(notes: List[NoteRecord], path: Path) -> bool:
+    writer = StreamingXlsxWriter(path)
+    if not writer.enabled:
+        return False
+    for note in notes:
+        writer.append(note)
+    writer.finalize(build_stats(notes, path.parent))
+    return True
+
+
+def build_stats(notes: List[NoteRecord], out_dir: Path) -> Dict[str, object]:
+    account_names = sorted({note.account for note in notes})
+    folder_names = sorted({note.folder for note in notes})
+    return {
+        "exported_at": datetime.now().isoformat(),
+        "total_notes": len(notes),
+        "total_words": sum(note.word_count for note in notes),
+        "total_chars": sum(note.char_count for note in notes),
+        "total_accounts": len(account_names),
+        "total_folders": len(folder_names),
+        "account_names": account_names,
+        "folder_names": folder_names,
+        "output_dir": str(out_dir),
+    }
+
+
+def sanitize_for_xlsx(value):
+    if isinstance(value, str):
+        return ILLEGAL_XLSX_CHAR_RE.sub("", value)
+    return value
 
 
 class StreamingXlsxWriter:
@@ -448,23 +671,23 @@ class StreamingXlsxWriter:
         if not self.enabled:
             return
         self._ws.append([
-            note.account,
-            note.folder,
-            note.id,
-            note.title,
-            note.created,
-            note.modified,
+            sanitize_for_xlsx(note.account),
+            sanitize_for_xlsx(note.folder),
+            sanitize_for_xlsx(note.id),
+            sanitize_for_xlsx(note.title),
+            sanitize_for_xlsx(note.created),
+            sanitize_for_xlsx(note.modified),
             note.word_count,
             note.char_count,
-            note.body_text,
-            note.body_html,
+            sanitize_for_xlsx(note.body_text),
+            sanitize_for_xlsx(note.body_html),
         ])
 
     def finalize(self, stats: Dict[str, object]) -> None:
         if not self.enabled:
             return
         self._summary.append(["metric", "value"])
-        self._summary.append(["exported_at", datetime.now().isoformat()])
+        self._summary.append(["exported_at", sanitize_for_xlsx(datetime.now().isoformat())])
         for key in [
             "total_notes",
             "total_accounts",
@@ -472,11 +695,11 @@ class StreamingXlsxWriter:
             "total_words",
             "total_chars",
         ]:
-            self._summary.append([key, stats.get(key, 0)])
+            self._summary.append([sanitize_for_xlsx(key), sanitize_for_xlsx(stats.get(key, 0))])
         self._wb.save(self.path)
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Stream-export Apple Notes into merged files.")
     p.add_argument("--output-dir", required=True, help="Directory for export outputs")
     p.add_argument("--account", default=None, help="Optional exact account name filter, e.g. iCloud")
@@ -484,15 +707,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--resume", action="store_true", help="Resume from .export_state.json if it exists")
     p.add_argument("--state-file", default=".export_state.json", help="State filename inside output dir")
     p.add_argument("--progress-every", type=int, default=25, help="Print progress every N notes")
-    return p.parse_args()
+    return p.parse_args(argv)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     if sys.platform != "darwin":
         print("This script only runs on macOS.", file=sys.stderr)
         return 2
 
-    args = parse_args()
+    args = parse_args(argv)
     out_dir = Path(os.path.expanduser(args.output_dir)).resolve()
     ensure_dir(out_dir)
 
@@ -615,6 +838,39 @@ def main() -> int:
         csv_file.close()
         jsonl_file.close()
         md_file.close()
+
+    if total_notes == 0 and folders:
+        print("Streaming export found folders but no notes. Retrying with bulk fallback...")
+        fallback_notes = fetch_all_notes(args.account)
+        if fallback_notes:
+            write_csv_records(fallback_notes, csv_path)
+            write_jsonl_records(fallback_notes, jsonl_path)
+            write_markdown_records(fallback_notes, md_path)
+
+            xlsx_enabled = False
+            if not args.skip_xlsx:
+                xlsx_enabled = write_xlsx_records(fallback_notes, xlsx_path)
+
+            stats = build_stats(fallback_notes, out_dir)
+            stats["xlsx_enabled"] = xlsx_enabled
+            summary_path.write_text(json.dumps(stats, indent=2), encoding="utf-8")
+            if args.resume:
+                completed_folder_keys = [f"{account}{US}{folder_path}" for account, folder_path in folders]
+                save_state(state_path, sorted(completed_folder_keys), stats)
+
+            print(f"Fallback exporter recovered {len(fallback_notes)} notes")
+            print("\nExport complete")
+            print(f"CSV:     {csv_path}")
+            print(f"JSONL:   {jsonl_path}")
+            print(f"MD:      {md_path}")
+            print(f"SUMMARY: {summary_path}")
+            if args.resume:
+                print(f"STATE:   {state_path}")
+            if xlsx_enabled:
+                print(f"XLSX:    {xlsx_path}")
+            elif not args.skip_xlsx:
+                print("XLSX skipped because openpyxl is not available.")
+            return 0
 
     stats = {
         "exported_at": datetime.now().isoformat(),

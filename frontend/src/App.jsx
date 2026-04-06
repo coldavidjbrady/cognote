@@ -45,10 +45,35 @@ function SetupExperience({
 }) {
   const isRunning = jobStatus?.status === "running";
   const setupCounts = jobStatus?.import_summary || null;
+  const exportProgress = jobStatus?.export_progress || null;
+  const importProgress = jobStatus?.import_progress || null;
   const semanticNeedsKey =
     setupOptions.enableSemantic &&
     !settings?.openai_key_configured &&
     settings?.can_manage_openai_key;
+
+  let setupStatusDetail = null;
+  if (isRunning && jobStatus?.phase === "exporting_notes") {
+    const notesExported = exportProgress?.notes_exported || 0;
+    const foldersTotal = exportProgress?.folders_total || null;
+    const foldersCompleted = exportProgress?.folders_completed || 0;
+    const currentFolder = exportProgress?.current_folder || "";
+    if (notesExported > 0) {
+      setupStatusDetail = `Exported ${notesExported} notes so far`;
+    } else if (foldersTotal && currentFolder) {
+      setupStatusDetail = `Scanning folder ${Math.min(foldersCompleted + 1, foldersTotal)} of ${foldersTotal}: ${currentFolder}`;
+    } else {
+      setupStatusDetail = "Scanning Apple Notes for folders and note content";
+    }
+  } else if (isRunning && jobStatus?.phase === "importing_database") {
+    const notesImported = importProgress?.notes_imported || 0;
+    setupStatusDetail =
+      notesImported > 0
+        ? `Imported ${notesImported} notes into the local library so far`
+        : "Importing exported notes into the local library";
+  } else if (overview?.total_notes) {
+    setupStatusDetail = `Library currently contains ${overview.total_notes} notes`;
+  }
 
   return (
     <main className="setup-shell">
@@ -153,17 +178,21 @@ function SetupExperience({
 
         <div className="setup-status-block">
           <strong>{jobStatus?.message || "Ready to start setup."}</strong>
-          <p className="muted">
-            Existing notes detected: {overview?.total_notes || 0}
-            {overview?.archived_notes ? ` active, ${overview.archived_notes} archived` : ""}
-          </p>
+          {setupStatusDetail ? <p className="muted">{setupStatusDetail}</p> : null}
           {jobStatus?.error ? <p className="sync-error">{jobStatus.error}</p> : null}
+          {jobStatus?.status === "failed" && jobStatus?.log_path ? (
+            <p className="muted">Diagnostic log saved to: {jobStatus.log_path}</p>
+          ) : null}
+          {jobStatus?.import_error_log_path ? (
+            <p className="muted">Skipped-note log saved to: {jobStatus.import_error_log_path}</p>
+          ) : null}
           {setupCounts ? (
             <div className="sync-metrics">
               <span>{setupCounts.imported} imported</span>
               <span>{setupCounts.changed} changed</span>
               <span>{setupCounts.archived} archived</span>
               <span>{setupCounts.embedded} embedded</span>
+              <span>{setupCounts.failed || 0} skipped</span>
             </div>
           ) : null}
           <p className="muted">Latest activity: {formatDateTime(jobStatus?.finished_at || jobStatus?.started_at)}</p>
@@ -300,7 +329,7 @@ export default function App() {
   const [isSavingKey, setIsSavingKey] = useState(false);
   const [setupOptions, setSetupOptions] = useState({
     enableSemantic: true,
-    skipXlsx: false,
+    skipXlsx: true,
     resumeExport: false,
   });
   const previousSearchRef = useRef("");

@@ -97,6 +97,15 @@ def _default_exports_root_dir(runtime_mode: RuntimeMode, source_root: Path, app_
     return (source_root / "notes-export").resolve()
 
 
+def _default_logs_dir(runtime_mode: RuntimeMode, source_root: Path, app_support_dir: Path) -> Path:
+    override = os.getenv("COGNOTE_LOGS_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+    if runtime_mode == "packaged":
+        return (app_support_dir / "logs").resolve()
+    return (source_root / "logs").resolve()
+
+
 def _default_exporter_script_path(resource_root: Path, source_root: Path) -> Path:
     override = os.getenv("COGNOTE_EXPORTER_SCRIPT_PATH")
     if override:
@@ -134,6 +143,7 @@ class Settings:
     db_path: Path
     frontend_dist_dir: Path
     exports_root_dir: Path
+    logs_dir: Path
     exporter_script_path: Path
     openai_api_key: str | None
     openai_api_key_source: OpenAIKeySource
@@ -172,6 +182,7 @@ def get_settings() -> Settings:
         db_path=db_path,
         frontend_dist_dir=_default_frontend_dist_dir(resource_root),
         exports_root_dir=_default_exports_root_dir(runtime_mode, BASE_DIR, app_support_dir),
+        logs_dir=_default_logs_dir(runtime_mode, BASE_DIR, app_support_dir),
         exporter_script_path=_default_exporter_script_path(resource_root, BASE_DIR),
         openai_api_key=openai_api_key,
         openai_api_key_source=openai_api_key_source,
